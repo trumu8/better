@@ -1,4 +1,21 @@
 
+# List all required packages
+install.packages(c(
+  "shiny",
+  "shinydashboard",
+  "DT",
+  "plotly",
+  "dplyr",
+  "tidyr"
+))
+install.packages("renv")
+renv::init()  # Creates a lockfile
+renv::snapshot()
+
+
+
+
+
 
 library(shiny)
 library(shinydashboard)
