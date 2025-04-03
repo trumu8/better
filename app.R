@@ -7,8 +7,6 @@ library(plotly)
 library(dplyr)
 library(tidyr)
 
-getwd()
-setwd("/Users/trumu/Desktop/TNC")
 
 Data<- read.csv("~/Desktop/TNC/DACCountries.csv")
 
