@@ -1,3 +1,5 @@
+##Things to note. I think the key is creating a new project and saving it in R before you try to run or publish it
+
 library(shiny)
 library(shinydashboard)
 library(DT)
@@ -5,30 +7,26 @@ library(plotly)
 library(dplyr)
 library(tidyr)
 
-getwd()
-setwd("/Users/trumu/Desktop/TNC")
-
-Data<- read.csv("~/Desktop/TNC/DACCountries.csv")
-
-
-
-
-# Ensure Time.period is properly formatted
-Data <- Data %>%
+# Load your data
+Data<- read.csv("DACCountries.csv")%>%
   mutate(
     TIME_PERIOD = as.numeric(TIME_PERIOD),
-    OBS_VALUE = as.numeric(OBS_VALUE)
+    OBS_VALUE = as.numeric(OBS_VALUE),
+    Measure = factor(Measure,
+                     levels = c("Official development assistance (ODA), disbursements",
+                                "Humanitarian aid",
+                                "Development food aid"))
   )
 
 # UI
 ui <- dashboardPage(
   dashboardHeader(title = "OECD Aid Disbursements (2000-2023)"),
-  
   dashboardSidebar(
     sidebarMenu(
       menuItem("Overview", tabName = "overview", icon = icon("globe")),
       menuItem("Data Explorer", tabName = "explorer", icon = icon("table")),
-      menuItem("Trend Analysis", tabName = "trends", icon = icon("chart-line"))
+      menuItem("Trend Analysis", tabName = "trends", icon = icon("chart-line")),
+      menuItem("Comparisons", tabName = "comparisons", icon = icon("balance-scale"))
     ),
     
     # Filters
@@ -36,24 +34,33 @@ ui <- dashboardPage(
                 choices = sort(unique(Data$Donor)),
                 multiple = TRUE,
                 selected = unique(Data$Donor)[1]),
-    
     selectInput("recipient", "Select Recipient(s):", 
                 choices = sort(unique(Data$Recipient)),
                 multiple = TRUE,
                 selected = unique(Data$Recipient)[1]),
-    
     sliderInput("years", "Select Year Range:",
-                min = 2000,  # Fixed to your data range
-                max = 2023,
-                value = c(2000, 2023),
-                step = 1,
-                sep = ""),  # Remove comma in year display
-    
+                min = 2000, max = 2023,
+                value = c(2000, 2023), step = 1, sep = ""),
     selectInput("measure", "Select Measure:",
-                choices = sort(unique(Data$Measure)),
-                selected = unique(Data$Measure)[1])
+                choices = list(
+                  "All Measures" = "All",
+                  "ODA Disbursements" = "Official development assistance (ODA), disbursements",
+                  "Humanitarian Aid" = "Humanitarian aid",
+                  "Development Food Aid" = "Development food aid"
+                ),
+                selected = "All"),
+    
+    # Data source and contact information
+    div(style = "padding: 15px;",
+        h5("Data Source:"),
+        tags$a(href = "https://www.oecd.org/en/topics/sub-issues/oda-trends-and-statistics.html", "OECD Data Portal", target = "_blank"),
+        br(), br(),
+        h5("Contact Information:"),
+        h6("Andrew Hall"),
+        h6("Economic Data Analyst"),
+        p(style = "margin-bottom: 5px;", "Email: andrew.hall@TNC.ORG")  # Replace with your actual email
+    )
   ),
-  
   dashboardBody(
     tabItems(
       # Overview Tab
@@ -72,24 +79,35 @@ ui <- dashboardPage(
       
       # Data Explorer Tab
       tabItem(tabName = "explorer",
-              fluidRow(
-                box(width = 12,
-                    downloadButton("downloadData", "Download Data"),
-                    DTOutput("dataTable"))
-              )
+              box(width = 12, 
+                  downloadButton("downloadData", "Download Data"),
+                  DTOutput("dataTable"))
       ),
       
-      # Trend Analysis Tab
+      # Trend Analysis Tab (Fixed)
       tabItem(tabName = "trends",
-              fluidRow(
-                box(width = 12, plotlyOutput("detailedTrend")),
-                box(width = 12,
-                    radioButtons("trendType", "Trend Display:",
-                                 choices = c("By Donor" = "donor",
-                                             "By Recipient" = "recipient",
-                                             "By Measure" = "measure"),
-                                 selected = "donor",
-                                 inline = TRUE))
+              box(width = 12, 
+                  radioButtons("trendGroup", "Group by:",
+                               choices = c("Donor" = "Donor",
+                                           "Recipient" = "Recipient",
+                                           "Measure" = "Measure"),
+                               selected = "Donor",
+                               inline = TRUE)),
+              box(width = 12, plotlyOutput("trendPlot"))
+      ),
+      
+      # Comparisons Tab (Fixed with pie charts and proper measure comparison)
+      tabItem(tabName = "comparisons",
+              tabBox(width = 12,
+                     tabPanel("Donor Comparison",
+                              plotlyOutput("donorComparison"),
+                              plotlyOutput("donorPie")),
+                     tabPanel("Recipient Comparison",
+                              plotlyOutput("recipientComparison"),
+                              plotlyOutput("recipientPie")),
+                     tabPanel("Measure Analysis",
+                              plotlyOutput("measureTrend"),
+                              plotlyOutput("measurePie"))
               )
       )
     )
@@ -98,24 +116,26 @@ ui <- dashboardPage(
 
 # Server
 server <- function(input, output, session) {
-  
   # Reactive filtered data
   filtered_data <- reactive({
-    req(input$donor, input$recipient, input$measure)
-    
-    Data %>%
+    req(input$donor, input$recipient)
+    filtered <- Data %>%
       filter(
         Donor %in% input$donor,
         Recipient %in% input$recipient,
         TIME_PERIOD >= input$years[1],
-        TIME_PERIOD <= input$years[2],
-        Measure %in% input$measure
+        TIME_PERIOD <= input$years[2]
       )
+    
+    if(input$measure != "All") {
+      filtered <- filtered %>% filter(Measure == input$measure)
+    }
+    return(filtered)
   })
   
   # Update recipient choices based on selected donors
   observe({
-    recipients <- Data %>%
+    recipients <- Data%>%
       filter(Donor %in% input$donor) %>%
       pull(Recipient) %>%
       unique() %>%
@@ -134,10 +154,8 @@ server <- function(input, output, session) {
       round(2)
     
     valueBox(
-      paste0("$", total, "M"),
-      "Total Disbursement",
-      icon = icon("money-bill-wave"),
-      color = "green"
+      paste0("$", total, "M"), "Total Disbursement",
+      icon = icon("money-bill-wave"), color = "green"
     )
   })
   
@@ -148,19 +166,15 @@ server <- function(input, output, session) {
       round(2)
     
     valueBox(
-      paste0("$", avg, "M"),
-      "Annual Average",
-      icon = icon("calculator"),
-      color = "blue"
+      paste0("$", avg, "M"), "Annual Average",
+      icon = icon("calculator"), color = "blue"
     )
   })
   
   output$yearRange <- renderValueBox({
     valueBox(
-      paste(input$years[1], "-", input$years[2]),
-      "Year Range",
-      icon = icon("calendar"),
-      color = "yellow"
+      paste(input$years[1], "-", input$years[2]), "Year Range",
+      icon = icon("calendar"), color = "yellow"
     )
   })
   
@@ -170,12 +184,29 @@ server <- function(input, output, session) {
       group_by(TIME_PERIOD) %>%
       summarise(Total = sum(OBS_VALUE, na.rm = TRUE))
     
-    plot_ly(df, x = ~TIME_PERIOD, y = ~Total, type = 'scatter', mode = 'lines+markers') %>%
-      layout(title = "Annual Aid Disbursement Trend",
-             xaxis = list(title = "Year", range = c(2000, 2023)),
+    plot_ly(df, x = ~TIME_PERIOD, y = ~Total, 
+            type = 'scatter', mode = 'lines+markers') %>%
+      layout(title = "Annual Trend",
+             xaxis = list(title = "Year"),
              yaxis = list(title = "Amount (Millions USD)"))
   })
   
+  # Fixed Trend Analysis Plot
+  output$trendPlot <- renderPlotly({
+    req(input$trendGroup)
+    df <- filtered_data() %>%
+      group_by(TIME_PERIOD, !!sym(input$trendGroup)) %>%
+      summarise(Total = sum(OBS_VALUE, na.rm = TRUE))
+    
+    plot_ly(df, x = ~TIME_PERIOD, y = ~Total, 
+            color = ~get(input$trendGroup),
+            type = 'scatter', mode = 'lines+markers') %>%
+      layout(title = paste("Trend by", input$trendGroup),
+             xaxis = list(title = "Year"),
+             yaxis = list(title = "Amount (Millions USD)"))
+  })
+  
+  # Pie Charts
   output$donorShare <- renderPlotly({
     df <- filtered_data() %>%
       group_by(Donor) %>%
@@ -194,26 +225,71 @@ server <- function(input, output, session) {
       layout(title = "Share by Recipient")
   })
   
-  output$detailedTrend <- renderPlotly({
-    df <- filtered_data()
+  output$donorPie <- renderPlotly({
+    df <- filtered_data() %>%
+      group_by(Donor) %>%
+      summarise(Total = sum(OBS_VALUE, na.rm = TRUE))
     
-    if(input$trendType == "donor") {
-      df <- df %>% group_by(TIME_PERIOD, Donor)
-    } else if(input$trendType == "recipient") {
-      df <- df %>% group_by(TIME_PERIOD, Recipient)
-    } else {
-      df <- df %>% group_by(TIME_PERIOD, Measure)
-    }
+    plot_ly(df, labels = ~Donor, values = ~Total, type = 'pie') %>%
+      layout(title = "Donor Distribution")
+  })
+  
+  output$recipientPie <- renderPlotly({
+    df <- filtered_data() %>%
+      group_by(Recipient) %>%
+      summarise(Total = sum(OBS_VALUE, na.rm = TRUE))
     
-    df <- df %>% summarise(Total = sum(OBS_VALUE, na.rm = TRUE))
+    plot_ly(df, labels = ~Recipient, values = ~Total, type = 'pie') %>%
+      layout(title = "Recipient Distribution")
+  })
+  
+  # Measure Analysis
+  output$measureTrend <- renderPlotly({
+    df <- filtered_data() %>%
+      group_by(TIME_PERIOD, Measure) %>%
+      summarise(Total = sum(OBS_VALUE, na.rm = TRUE))
     
-    p <- plot_ly(df, x = ~TIME_PERIOD, y = ~Total, color = ~get(input$trendType),
-                 type = 'scatter', mode = 'lines') %>%
-      layout(title = "Detailed Trend Analysis",
-             xaxis = list(title = "Year", range = c(2000, 2023)),
+    plot_ly(df, x = ~TIME_PERIOD, y = ~Total, color = ~Measure,
+            type = 'scatter', mode = 'lines+markers') %>%
+      layout(title = "Measure Trend Over Time",
+             xaxis = list(title = "Year"),
              yaxis = list(title = "Amount (Millions USD)"))
+  })
+  
+  output$measurePie <- renderPlotly({
+    df <- filtered_data() %>%
+      group_by(Measure) %>%
+      summarise(Total = sum(OBS_VALUE, na.rm = TRUE))
     
-    p
+    plot_ly(df, labels = ~Measure, values = ~Total, type = 'pie') %>%
+      layout(title = "Measure Distribution")
+  })
+  
+  # Comparison Plots
+  output$donorComparison <- renderPlotly({
+    df <- filtered_data() %>%
+      group_by(Donor) %>%
+      summarise(Total = sum(OBS_VALUE, na.rm = TRUE)) %>%
+      arrange(desc(Total))
+    
+    plot_ly(df, x = ~Donor, y = ~Total, 
+            type = 'bar', color = ~Donor) %>%
+      layout(title = "Donor Comparison",
+             xaxis = list(title = ""),
+             yaxis = list(title = "Amount (Millions USD)"))
+  })
+  
+  output$recipientComparison <- renderPlotly({
+    df <- filtered_data() %>%
+      group_by(Recipient) %>%
+      summarise(Total = sum(OBS_VALUE, na.rm = TRUE)) %>%
+      arrange(desc(Total))
+    
+    plot_ly(df, x = ~Recipient, y = ~Total, 
+            type = 'bar', color = ~Recipient) %>%
+      layout(title = "Recipient Comparison",
+             xaxis = list(title = ""),
+             yaxis = list(title = "Amount (Millions USD)"))
   })
   
   # Data table
@@ -233,4 +309,4 @@ server <- function(input, output, session) {
   )
 }
 
-shinyApp(ui, server)
+shinyApp(ui = ui, server = server, options = list(height = 1080))
