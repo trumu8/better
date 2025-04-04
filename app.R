@@ -1,20 +1,25 @@
 
-# List all required packages
-install.packages(c(
-  "shiny",
-  "shinydashboard",
-  "DT",
-  "plotly",
-  "dplyr",
-  "tidyr"
-))
+# Set CRAN mirror
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+# Install missing packages if needed
+if (!require("shinydashboard")) install.packages("shinydashboard")
+if (!require("DT")) install.packages("DT")
+if (!require("plotly")) install.packages("plotly")
+if (!require("dplyr")) install.packages("dplyr")
+if (!require("tidyr")) install.packages("tidyr")
+
+# Load libraries
+library(shiny)
+library(shinydashboard)
+library(DT)
+library(plotly)
+library(dplyr)
+library(tidyr)
+
 install.packages("renv")
 renv::init()  # Creates a lockfile
 renv::snapshot()
-
-
-
-
 
 
 library(shiny)
