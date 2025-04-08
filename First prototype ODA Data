@@ -1,5 +1,7 @@
 ##Things to note. I think the key is creating a new project and saving it in R before you try to run or publish it
 
+
+
 library(shiny)
 library(shinydashboard)
 library(DT)
@@ -153,8 +155,10 @@ server <- function(input, output, session) {
       pull() %>%
       round(2)
     
+    formatted_total <- format(total, big.mark = ",", scientific = FALSE)
+    
     valueBox(
-      paste0("$", total, "M"), "Total Disbursement",
+      paste0("$", formatted_total, "M"), "Total Disbursement",
       icon = icon("money-bill-wave"), color = "green"
     )
   })
@@ -165,8 +169,10 @@ server <- function(input, output, session) {
       pull() %>%
       round(2)
     
+    formatted_avg <- format(avg, big.mark = ",", scientific = FALSE)
+    
     valueBox(
-      paste0("$", avg, "M"), "Annual Average",
+      paste0("$", formatted_avg, "M"), "Annual Average",
       icon = icon("calculator"), color = "blue"
     )
   })
