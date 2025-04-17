@@ -106,6 +106,7 @@ library(ggplot2)
 library(dplyr)
 library(plotly)
 library(stringr)  # For str_wrap
+library(DT)  # For interactive tables
 
 # Define the mapping of indicator abbreviations to full names
 indicator_mapping <- c(
@@ -117,14 +118,15 @@ indicator_mapping <- c(
   "Voice and Accountability" = "va"
 )
 
-# Assuming WGI, SDG, and merged_data are already loaded
+# Assuming WGI and SDG are already loaded
 # Define UI for the Shiny dashboard
 ui <- dashboardPage(
-  dashboardHeader(title = "WGI Dashboard"),
+  dashboardHeader(title = "NB Dashboard"),
   dashboardSidebar(
     sidebarMenu(
       menuItem("Trend Analysis", tabName = "trend", icon = icon("line-chart")),
-      menuItem("Country Comparison", tabName = "comparison", icon = icon("globe"))
+      menuItem("Country Comparison", tabName = "comparison", icon = icon("globe")),
+      menuItem("Data Table", tabName = "data_table", icon = icon("table"))
     )
   ),
   dashboardBody(
@@ -158,7 +160,7 @@ ui <- dashboardPage(
               # SDG Section (Bottom)
               fluidRow(
                 box(
-                  title = "Select Countries",
+                  title = "Select Country",
                   selectInput("sdg_country", "Countries:", 
                               choices = unique(SDG$Country), 
                               multiple = TRUE, 
@@ -198,6 +200,35 @@ ui <- dashboardPage(
                   title = "Country and Indicator Comparison",
                   h4("Compare Worldwide Governance Indicators Across Countries"),
                   plotlyOutput("comparison_plot", height = "600px"),
+                  width = 9, status = "primary", solidHeader = TRUE
+                )
+              )
+      ),
+      # Data Table Tab
+      tabItem(tabName = "data_table",
+              fluidRow(
+                box(
+                  title = "Table Parameters",
+                  selectInput("table_countries", "Countries:", 
+                              choices = unique(WGI$countryname), 
+                              multiple = TRUE, 
+                              selected = c("Afghanistan", "Albania", "Algeria")),
+                  selectInput("table_indicators", "Indicators:", 
+                              choices = indicator_mapping, 
+                              multiple = TRUE, 
+                              selected = "cc"),
+                  selectInput("table_year", "Year:", 
+                              choices = unique(WGI$year), 
+                              selected = 1996),
+                  selectInput("table_type", "Table Type:", 
+                              choices = c("WGI Only", "SDG Only", "Combined"),
+                              selected = "WGI Only"),
+                  width = 3, status = "primary", solidHeader = TRUE
+                ),
+                box(
+                  title = "Rankings Table",
+                  DTOutput("rankings_table"),
+                  downloadButton("download_table", "Download Table"),
                   width = 9, status = "primary", solidHeader = TRUE
                 )
               )
@@ -304,6 +335,54 @@ server <- function(input, output) {
     
     ggplotly(p) %>% layout(legend = list(orientation = "h", x = 0.5, y = 1.1, xanchor = "center"))
   })
+  
+  # Reactive table data for the Data Table tab
+  table_data <- reactive({
+    # WGI Data
+    wgi_data <- WGI %>%
+      filter(countryname %in% input$table_countries, 
+             indicator %in% input$table_indicators,
+             year == input$table_year) %>%
+      mutate(Indicator = names(indicator_mapping)[match(indicator, indicator_mapping)]) %>%
+      select(Country = countryname, Indicator, Year = year, `Percentile Rank` = pctrank, `Standard Deviation` = stddev) %>%
+      arrange(Country, Indicator, Year)
+    
+    # SDG Data
+    sdg_data <- SDG %>%
+      filter(Country %in% input$table_countries,
+             year == input$table_year) %>%
+      select(Country, Year = year, `SDG Rank` = SDG_rank) %>%
+      arrange(Country, Year)
+    
+    # Return based on table type
+    if (input$table_type == "WGI Only") {
+      return(wgi_data)
+    } else if (input$table_type == "SDG Only") {
+      return(sdg_data)
+    } else { # Combined
+      combined_data <- wgi_data %>%
+        left_join(sdg_data, by = c("Country", "Year")) %>%
+        arrange(Country, Indicator, Year)
+      return(combined_data)
+    }
+  })
+  
+  # Render the table
+  output$rankings_table <- renderDT({
+    datatable(table_data(), 
+              options = list(pageLength = 10, autoWidth = TRUE),
+              rownames = FALSE)
+  })
+  
+  # Download handler for the table
+  output$download_table <- downloadHandler(
+    filename = function() {
+      paste("rankings-table-", input$table_type, "-", Sys.Date(), ".csv", sep = "")
+    },
+    content = function(file) {
+      write.csv(table_data(), file, row.names = FALSE)
+    }
+  )
 }
 
 # Run the application
