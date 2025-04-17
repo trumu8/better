@@ -1,0 +1,310 @@
+#Data Cleaning
+#This is a datacleaning setps for the SDG and WGI dataset
+
+getwd()
+setwd("/Users/trumu/Desktop/TNC/Data")
+
+WGI<- read_xlsx("/Users/trumu/Desktop/TNC/Data/wgidataset.xlsx")
+
+#Checking the structure of the variables
+str(WGI[, c("estimate", "stddev", "pctrank", "pctranklower", "pctrankupper")])
+
+#Removing all ".."
+WGI <- WGI %>%
+  filter(if_all(everything(), ~ .x != ".."))
+
+#rounding all figures
+WGI <- WGI %>%
+  mutate(across(c(estimate, stddev, pctrank, pctranklower, pctrankupper),
+                ~ round(as.numeric(.x), 2)))
+
+#extracting just the code (first 3 letters)
+WGI <- WGI %>%
+  mutate(country_code = str_sub(codeindyr, 1, 3))
+
+#moving the country_code to the front
+WGI <- WGI %>%
+  select(country_code, everything())
+
+
+
+#Loading the data
+SDR2024 <- read_excel("/Users/trumu/Desktop/TNC/Data/SDR2024-data.xlsx", sheet = "2024")
+
+SDR2024<- SDR2024 %>%
+  mutate(year = 2024) 
+
+"Backdated" <- read_excel("/Users/trumu/Desktop/TNC/Data/SDR2024-data.xlsx", sheet = "Backdated SDG Index")
+
+#Calculating the ranks for the backdated data since it came with no ranks
+
+# Calculate ranks within each year
+library(dplyr)
+
+
+Backdated <- Backdated %>%
+  rename(SDG_index = `SDG Index Score`)
+
+Backdated <- Backdated %>%
+  rename(code = id)
+
+Backdated <- Backdated %>%
+  group_by(year) %>%
+  mutate(
+    SDG_rank = rank(-SDG_index, ties.method = "min")  # Note the backticks and correct syntax
+  ) %>%
+  ungroup() %>%
+  arrange(year, SDG_rank)
+
+#working on the 2024 data
+colnames(SDR2024)
+
+SDR2024 <- SDR2024 %>%
+  rename(code = `Country Code ISO3`) 
+
+SDR2024 <- SDR2024 %>%
+  rename(SDG_rank = `2024 SDG Index Rank`) 
+
+SDR2024 <- SDR2024 %>%
+  rename(SDG_index = `2024 SDG Index Score`)
+
+#Combining the dataset
+SDG <- bind_rows(Backdated, SDR2024) %>%
+  arrange(code, year)  # Sort by country and year
+
+SDG<- SDG %>%
+  select(code, year, SDG_index, SDG_rank, Country) 
+
+
+#Merging datasets
+
+wgi_pivoted <- WGI %>%
+  select(countryname, year, indicator, pctrank) %>%  # Select relevant columns
+  pivot_wider(
+    names_from = indicator,
+    values_from = pctrank,
+    names_prefix = "wgi_"  # Prefix WGI columns (e.g., wgi_cc, wgi_pv)
+  ) %>%
+  rename(Country = countryname)
+
+
+merged_data <- inner_join(
+  wgi_pivoted,
+  SDG,
+  by = c("Country", "year")
+)
+
+
+
+
+#Setting up the prototype
+
+# Required libraries
+library(shiny)
+library(shinydashboard)
+library(ggplot2)
+library(dplyr)
+library(plotly)
+library(stringr)  # For str_wrap
+
+# Define the mapping of indicator abbreviations to full names
+indicator_mapping <- c(
+  "Control of Corruption" = "cc",
+  "Political Stability and Absence of Violence/Terrorism" = "pv",
+  "Rule of Law" = "rl",
+  "Regulatory Quality" = "rq",
+  "Government Effectiveness" = "ge",
+  "Voice and Accountability" = "va"
+)
+
+# Assuming WGI, SDG, and merged_data are already loaded
+# Define UI for the Shiny dashboard
+ui <- dashboardPage(
+  dashboardHeader(title = "WGI Dashboard"),
+  dashboardSidebar(
+    sidebarMenu(
+      menuItem("Trend Analysis", tabName = "trend", icon = icon("line-chart")),
+      menuItem("Country Comparison", tabName = "comparison", icon = icon("globe"))
+    )
+  ),
+  dashboardBody(
+    tabItems(
+      # Trend Analysis Tab
+      tabItem(tabName = "trend",
+              # WGI Section (Top)
+              fluidRow(
+                box(
+                  title = "Select WGI Parameters",
+                  selectInput("wgi_country", "Country:", 
+                              choices = unique(WGI$countryname), 
+                              multiple = FALSE, 
+                              selected = "Afghanistan"),
+                  selectInput("wgi_indicator", "Indicators:", 
+                              choices = indicator_mapping, 
+                              multiple = TRUE, 
+                              selected = "cc"),
+                  sliderInput("wgi_years", "Year Range:",
+                              min = min(WGI$year), max = max(WGI$year),
+                              value = c(min(WGI$year), max(WGI$year)),
+                              step = 1, sep = ""),
+                  width = 4
+                ),
+                box(
+                  title = "WGI Trend Over Time",
+                  plotlyOutput("wgi_trend_plot"),
+                  width = 8
+                )
+              ),
+              # SDG Section (Bottom)
+              fluidRow(
+                box(
+                  title = "Select Countries",
+                  selectInput("sdg_country", "Countries:", 
+                              choices = unique(SDG$Country), 
+                              multiple = TRUE, 
+                              selected = "Afghanistan"),
+                  sliderInput("sdg_years", "Year Range:",
+                              min = min(SDG$year), max = max(SDG$year),
+                              value = c(min(SDG$year), max(SDG$year)),
+                              step = 1, sep = ""),
+                  width = 4
+                ),
+                box(
+                  title = "SDG Rank Over Time",
+                  plotlyOutput("sdg_rank_plot"),
+                  width = 8
+                )
+              )
+      ),
+      # Country Comparison Tab
+      tabItem(tabName = "comparison",
+              fluidRow(
+                box(
+                  title = "Comparison Parameters",
+                  selectInput("comp_countries", "Countries:", 
+                              choices = unique(WGI$countryname), 
+                              multiple = TRUE, 
+                              selected = c("Afghanistan", "Albania", "Algeria")),
+                  selectInput("comp_indicators", "Indicators:", 
+                              choices = indicator_mapping, 
+                              multiple = TRUE, 
+                              selected = "cc"),
+                  selectInput("comp_year", "Year:", 
+                              choices = unique(WGI$year), 
+                              selected = 1996),
+                  width = 3, status = "primary", solidHeader = TRUE
+                ),
+                box(
+                  title = "Country and Indicator Comparison",
+                  h4("Compare Worldwide Governance Indicators Across Countries"),
+                  plotlyOutput("comparison_plot", height = "600px"),
+                  width = 9, status = "primary", solidHeader = TRUE
+                )
+              )
+      )
+    )
+  )
+)
+
+# Define server logic
+server <- function(input, output) {
+  
+  # WGI Trend Plot
+  output$wgi_trend_plot <- renderPlotly({
+    data <- WGI %>%
+      filter(countryname == input$wgi_country, 
+             indicator %in% input$wgi_indicator,
+             year >= input$wgi_years[1], 
+             year <= input$wgi_years[2]) %>%
+      arrange(year) %>%
+      mutate(indicator_full = names(indicator_mapping)[match(indicator, indicator_mapping)])
+    
+    p <- ggplot(data, aes(x = year, y = pctrank, color = indicator_full)) +
+      geom_line() +
+      geom_point() +
+      geom_ribbon(aes(ymin = pctrank - stddev, ymax = pctrank + stddev), alpha = 0.2) +
+      theme_minimal() +
+      labs(title = paste("WGI Trends for", input$wgi_country),
+           x = "Year", y = "Percentile Rank",
+           color = NULL)
+    
+    ggplotly(p)
+  })
+  
+  # SDG Rank Plot
+  output$sdg_rank_plot <- renderPlotly({
+    data <- SDG %>%
+      filter(Country %in% input$sdg_country,
+             year >= input$sdg_years[1],
+             year <= input$sdg_years[2]) %>%
+      arrange(year)
+    
+    p <- ggplot(data, aes(x = year, y = SDG_rank, color = Country)) +
+      geom_line(size = 1) +
+      geom_point(size = 2) +
+      scale_y_reverse() +
+      theme_minimal() +
+      labs(title = "SDG Rank Across Countries",
+           x = "Year", y = "SDG Global Rank (Higher is Better)",
+           color = NULL)
+    
+    ggplotly(p, tooltip = c("x", "y", "color"))
+  })
+  
+  # Country Comparison Plot
+  output$comparison_plot <- renderPlotly({
+    data <- WGI %>%
+      filter(countryname %in% input$comp_countries, 
+             indicator %in% input$comp_indicators,
+             year == input$comp_year) %>%
+      mutate(indicator_full = names(indicator_mapping)[match(indicator, indicator_mapping)]) %>%
+      mutate(indicator_group = as.numeric(factor(indicator_full, levels = unique(indicator_full)))) %>%
+      group_by(indicator_full) %>%
+      mutate(country_pos = row_number()) %>%
+      ungroup()
+    
+    dodge_width <- 0.3
+    data <- data %>%
+      mutate(y_pos = indicator_group + (country_pos - mean(country_pos)) * dodge_width)
+    
+    p <- ggplot(data) +
+      geom_segment(aes(x = 0, xend = pctrank, y = y_pos, yend = y_pos, color = countryname), 
+                   linewidth = 6) +
+      geom_errorbarh(aes(xmin = pctrank - stddev, xmax = pctrank + stddev, y = y_pos), 
+                     height = 0.2) +
+      geom_text(data = data %>% distinct(indicator_full, indicator_group), 
+                aes(x = -50, y = indicator_group, label = indicator_full), 
+                hjust = 0, size = 4, fontface = "bold") +
+      geom_text(aes(x = -20, y = y_pos, label = countryname), hjust = 0, size = 3.5) +
+      geom_text(aes(x = -5, y = y_pos, label = year), hjust = 0, size = 3.5) +
+      scale_x_continuous(limits = c(-50, 100), breaks = seq(0, 100, by = 20)) +
+      theme_minimal(base_size = 14) +
+      theme(
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        axis.title.y = element_blank(),
+        axis.title.x = element_text(face = "bold", size = 12),
+        legend.position = "top",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 10),
+        plot.background = element_rect(fill = "#f5f5f5", color = NA),
+        panel.background = element_rect(fill = "white", color = NA)
+      ) +
+      labs(x = "Percentile Rank (0 to 100)") +
+      annotate("text", x = -50, y = max(data$indicator_group) + 1, label = "Indicator", 
+               hjust = 0, fontface = "bold", size = 5) +
+      annotate("text", x = -20, y = max(data$indicator_group) + 1, label = "Country", 
+               hjust = 0, fontface = "bold", size = 5) +
+      annotate("text", x = -5, y = max(data$indicator_group) + 1, label = "Year", 
+               hjust = 0, fontface = "bold", size = 5) +
+      annotate("text", x = 50, y = max(data$indicator_group) + 1, 
+               label = "Percentile Rank (0 to 100)", hjust = 0.5, fontface = "bold", size = 5)
+    
+    ggplotly(p) %>% layout(legend = list(orientation = "h", x = 0.5, y = 1.1, xanchor = "center"))
+  })
+}
+
+# Run the application
+shinyApp(ui = ui, server = server)
