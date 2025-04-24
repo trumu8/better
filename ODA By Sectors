@@ -1,0 +1,201 @@
+##ODA BY Sectors
+
+
+
+SectorsODA<- read.csv("ODasectors.csv")
+# Remove columns that have any NA values
+SectorsODA <- SectorsODA[, colSums(is.na(SectorsODA)) == 0]
+
+##Donor, Recipient, SECTOR, Sector, MEASURE,Measure, MARKER, Marker TIME_PERIOD OBS_VALUE
+
+# List of columns you want to keep
+columns_to_keep <- c("Donor", "Recipient", "SECTOR" ,"Sector", "MEASURE", "Measure", "MARKER", "Marker", "TIME_PERIOD", "OBS_VALUE")
+
+# Subset your data to keep only the specified columns
+data <- SectorsODA[, columns_to_keep]
+
+
+# Load required packages
+library(shiny)
+library(shinydashboard)
+library(data.table)
+library(ggplot2)
+library(plotly)
+library(DT)
+library(shinyWidgets)
+
+# Convert data to data.table and ensure correct types
+setDT(data)
+data[, `:=`(
+  OBS_VALUE = as.numeric(OBS_VALUE),
+  TIME_PERIOD = as.numeric(TIME_PERIOD)
+)]
+
+# Pre-aggregate data for performance
+agg_data <- data[, .(
+  Total = sum(OBS_VALUE, na.rm = TRUE)
+), by = .(Donor, Recipient, Sector, SECTOR, Marker, TIME_PERIOD)]
+
+# UI
+ui <- dashboardPage(
+  dashboardHeader(title = "ODA by Sectors"),
+  dashboardSidebar(
+    sidebarMenu(
+      menuItem("Overview", tabName = "overview", icon = icon("dashboard")),
+      menuItem("Sectors", tabName = "sectors", icon = icon("sitemap"))
+    ),
+    selectInput("donor", "Choose Donor(s):", choices = c("All Donors", unique(data$Donor)), multiple = TRUE, selected = "All Donors"),
+    selectInput("recipient", "Choose Recipient(s):", choices = c("All Recipients", unique(data$Recipient)), multiple = TRUE, selected = "All Recipients"),
+    selectInput("year", "Choose Year(s):", choices = c("All Years", sort(unique(data$TIME_PERIOD))), multiple = TRUE, selected = "All Years"),
+    selectInput("sector", "Choose Sector(s):", choices = c("All Sectors", unique(data$Sector)), multiple = TRUE, selected = "All Sectors"),
+    selectInput("marker", "Choose Environmental Goal(s):", choices = c("All Environmental Goals", unique(data$Marker)), multiple = TRUE, selected = "All Environmental Goals"),
+    # Data source and contact information
+    div(style = "padding: 15px;",
+        h5("Data Source:"),
+        tags$a(href = "https://www.oecd.org/en/topics/sub-issues/oda-trends-and-statistics.html", "OECD Data Portal", target = "_blank"),
+        br(), br(),
+        h5("Contact Information:"),
+        h6("Andrew Hall"),
+        h6("Economic Data Analyst"),
+        p(style = "margin-bottom: 5px;", "Email: andrew.hall@TNC.ORG")
+    )
+  ),
+  dashboardBody(
+    tags$head(tags$style(HTML("
+      .content-wrapper { background-color: #f7f7f7; }
+      .value-box { font-size: 18px; }
+      .box { border-radius: 8px; }
+      .box-title { font-size: 20px; }
+      label { font-size: 16px; }
+    "))),
+    tags$div(style = "padding: 10px; font-size: 16px;", 
+             "See how aid funding supports different sectors and environmental goals."),
+    tabItems(
+      # Overview Tab
+      tabItem(tabName = "overview",
+              fluidRow(
+                valueBoxOutput("total_funding", width = 4),
+                valueBoxOutput("num_donors", width = 4),
+                valueBoxOutput("top_sector", width = 4)
+              ),
+              fluidRow(
+                box(title = "Who Gives or Gets the Funding?", width = 6,
+                    selectInput("overview_by", "Show by:", choices = c("Donors", "Recipients"), selected = "Donors"),
+                    plotlyOutput("overview_bar"),
+                    tags$div(style = "font-size: 14px; padding: 10px;", "This shows who gives or gets the funding.")),
+                box(title = "Which Sectors Get the Most Funding?", width = 6,
+                    plotlyOutput("overview_pie"),
+                    tags$div(style = "font-size: 14px; padding: 10px;", "This shows how funding is split across sectors."))
+              )
+      ),
+      # Sectors Tab
+      tabItem(tabName = "sectors",
+              fluidRow(
+                box(title = "Funding by Sector", width = 12,
+                    plotlyOutput("sector_bar", height = "600px"),
+                    tags$div(style = "font-size: 14px; padding: 10px;", "This shows which sectors get the most funding."))
+              ),
+              fluidRow(
+                box(title = "Funding by Sector and Environmental Goal", width = 12,
+                    plotlyOutput("sector_stacked_bar", height = "600px"),
+                    tags$div(style = "font-size: 14px; padding: 10px;", "This shows how funding for each sector supports environmental goals."))
+              )
+      )
+    )
+  )
+)
+
+# Server
+server <- function(input, output, session) {
+  # Reactive filtered data
+  filtered_data <- reactive({
+    dt <- copy(agg_data)
+    if (!"All Donors" %in% input$donor) dt <- dt[Donor %in% input$donor]
+    if (!"All Recipients" %in% input$recipient) dt <- dt[Recipient %in% input$recipient]
+    if (!"All Years" %in% input$year) dt <- dt[TIME_PERIOD %in% as.numeric(input$year)]
+    if (!"All Sectors" %in% input$sector) dt <- dt[Sector %in% input$sector]
+    if (!"All Environmental Goals" %in% input$marker) dt <- dt[Marker %in% input$marker]
+    dt
+  })
+  
+  # Overview Tab: Summary Boxes
+  output$total_funding <- renderValueBox({
+    total <- filtered_data()[, sum(Total, na.rm = TRUE)]
+    valueBox(
+      paste0("$", format(round(total, 2), big.mark = ","), "M"),
+      "Total Funding", icon = icon("dollar-sign"), color = "blue"
+    )
+  })
+  
+  output$num_donors <- renderValueBox({
+    valueBox(
+      filtered_data()[, length(unique(Donor))],
+      "Number of Donors", icon = icon("users"), color = "green"
+    )
+  })
+  
+  output$top_sector <- renderValueBox({
+    top <- filtered_data()[, .(Total = sum(Total, na.rm = TRUE)), by = Sector
+    ][order(-Total)][1]
+    valueBox(
+      top$Sector,
+      "Top Sector", icon = icon("sitemap"), color = "orange"
+    )
+  })
+  
+  # Overview Tab: Bar Chart
+  output$overview_bar <- renderPlotly({
+    dt <- filtered_data()[, .(Total = sum(Total, na.rm = TRUE)), 
+                          by = eval(ifelse(input$overview_by == "Donors", "Donor", "Recipient"))
+    ][order(-Total)][1:10]
+    setnames(dt, ifelse(input$overview_by == "Donors", "Donor", "Recipient"), "Category")
+    p <- ggplot(dt, aes(x = reorder(Category, Total), y = Total, fill = Category)) +
+      geom_bar(stat = "identity") +
+      coord_flip() +
+      labs(x = "", y = "Funding ($ Millions)") +
+      theme_minimal() +
+      theme(legend.position = "none")
+    ggplotly(p, tooltip = c("x", "y"))
+  })
+  
+  # Overview Tab: Pie Chart
+  output$overview_pie <- renderPlotly({
+    dt <- filtered_data()[, .(Total = sum(Total, na.rm = TRUE)), by = Sector
+    ][order(-Total)][1:5]
+    p <- plot_ly(dt, labels = ~Sector, values = ~Total, type = "pie", 
+                 textinfo = "label+percent", showlegend = FALSE) %>%
+      layout(title = "")
+    p
+  })
+  
+  # Sectors Tab: Bar Chart
+  output$sector_bar <- renderPlotly({
+    dt <- filtered_data()[, .(Total = sum(Total, na.rm = TRUE)), by = Sector
+    ][order(-Total)]
+    p <- ggplot(dt, aes(x = reorder(Sector, Total), y = Total, fill = Sector)) +
+      geom_bar(stat = "identity") +
+      coord_flip() +
+      labs(x = "Sector", y = "Funding ($ Millions)") +
+      scale_y_continuous(labels = function(x) paste0(format(round(x, 2), big.mark = ","), "M")) +
+      theme_minimal() +
+      theme(legend.position = "none")
+    ggplotly(p, tooltip = c("x", "y"))
+  })
+  
+  # Sectors Tab: Stacked Bar Chart
+  output$sector_stacked_bar <- renderPlotly({
+    dt <- filtered_data()[, .(Total = sum(Total, na.rm = TRUE)), by = .(Sector, Marker)
+    ][, Total_Sector := sum(Total, na.rm = TRUE), by = Sector
+    ][order(-Total_Sector)]
+    p <- ggplot(dt, aes(x = reorder(Sector, Total_Sector), y = Total, fill = Marker)) +
+      geom_bar(stat = "identity") +
+      coord_flip() +
+      labs(x = "Sector", y = "Funding ($ Millions)", fill = "Environmental Goals") +
+      scale_y_continuous(labels = function(x) paste0(format(round(x, 2), big.mark = ","), "M")) +
+      theme_minimal()
+    ggplotly(p, tooltip = c("x", "y", "fill"))
+  })
+}
+
+# Run the app
+shinyApp(ui, server)
