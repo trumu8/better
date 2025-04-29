@@ -1,3 +1,4 @@
+
 # Load required packages
 library(shiny)
 library(shinydashboard)
@@ -9,44 +10,79 @@ library(shinyWidgets)
 library(DT)
 library(readxl)  # For read_excel
 library(mapview) # For mapshot to download maps
+library(stringr)
+library(readr)# For string manipulation
 
 # Load the NET dataset
 NET <- read_excel("NETAwards.xlsx", sheet = "Awards")
 
-# Debug: Check for lat and lng columns in NET
-message("Checking NET dataset for lat and lng columns:")
-if ("lat" %in% names(NET)) {
-  message("lat column exists. Number of non-NA lat values: ", sum(!is.na(NET$lat)))
-} else {
-  message("lat column is missing in NET dataset")
-}
-if ("lng" %in% names(NET)) {
-  message("lng column exists. Number of non-NA lng values: ", sum(!is.na(NET$lng)))
-} else {
-  message("lng column is missing in NET dataset")
-}
+# Debug: Print unique Nearest Town values
+message("Unique Nearest Town values before cleaning:")
+print(sort(unique(NET$`Nearest Town`)))
 
-# If lat and lng are missing or all NA, generate fictional coordinates
-if (!("lat" %in% names(NET)) || !("lng" %in% names(NET)) || all(is.na(NET$lat)) || all(is.na(NET$lng))) {
-  message("lat and/or lng are missing or all NA. Generating fictional coordinates.")
-  # Get unique towns
-  unique_towns <- unique(NET$`Nearest Town`)
-  unique_towns <- unique_towns[!is.na(unique_towns) & unique_towns != ""]
-  
-  # Generate fictional coordinates (centered around lat 35, lng -80, roughly North Carolina, USA)
-  set.seed(123)  # For reproducibility
-  town_coords <- tibble(
-    `Nearest Town` = unique_towns,
-    lat = 35 + runif(length(unique_towns), -0.5, 0.5),
-    lng = -80 + runif(length(unique_towns), -0.5, 0.5)
-  )
-  
-  # Join coordinates to NET
-  NET <- NET %>%
-    left_join(town_coords, by = "Nearest Town")
-} else {
-  message("Using existing lat and lng columns in NET dataset.")
-}
+# Step 1: Clean and prepare Nearest Town values for geocoding
+unique_towns <- unique(NET$`Nearest Town`)
+unique_towns <- unique_towns[!is.na(unique_towns) & unique_towns != ""]  # Remove NA and empty
+unique_towns <- str_trim(unique_towns)  # Trim whitespace
+unique_towns <- str_to_title(unique_towns)  # Standardize capitalization (e.g., "omaha" to "Omaha")
+
+# Prepare towns for geocoding by appending ", NE"
+towns_for_geocoding <- tibble(
+  id = seq_along(unique_towns),  # Unique ID for Census Geocoder
+  address = paste(unique_towns, "NE", sep = ", "),  # Format as "Town, NE"
+  town = unique_towns
+)
+
+# Debug: Print towns prepared for geocoding
+message("Towns prepared for geocoding:")
+print(towns_for_geocoding)
+
+# Step 2: Simulate geocoding with the Census Geocoder
+# In practice, you'd upload towns_for_geocoding to geocoding.geo.census.gov as a CSV
+# and download the results. Here, we'll simulate the results with known coordinates.
+# Using coordinates from sources like www.mapsofworld.com and www.latlong.net
+simulated_geocoded_results <- tibble(
+  town = c(
+    "Omaha", "Lincoln", "Grand Island", "North Platte", "Kearney",
+    "Hastings", "Columbus", "Scottsbluff", "Norfolk", "Fremont"
+  ),
+  lat = c(
+    41.2565, 40.8136, 40.9264, 41.1400, 40.6993,
+    40.5863, 41.4297, 41.8666, 42.0329, 41.4333
+  ),
+  lng = c(
+    -95.9345, -96.7026, -98.3420, -100.7601, -99.0815,
+    -98.3917, -97.3685, -103.6672, -97.4170, -96.4981
+  ),
+  match = TRUE  # Indicates successful geocoding
+)
+
+# Step 3: Join geocoded results back to the towns, with fallback for unmatched towns
+town_coords <- towns_for_geocoding %>%
+  left_join(simulated_geocoded_results, by = "town") %>%
+  mutate(
+    # For unmatched towns (match is NA or FALSE), use Nebraska's geographic center
+    lat = if_else(is.na(match) | !match, 41.5, lat),
+    lng = if_else(is.na(match) | !match, -99.9, lng),
+    geocoding_status = if_else(is.na(match) | !match, "Failed: Assigned to Nebraska center", "Success")
+  ) %>%
+  select(town, lat, lng, geocoding_status)
+
+# Debug: Print geocoding results
+message("Geocoding results:")
+print(town_coords)
+
+# Step 4: Join coordinates back to NET dataset
+NET <- NET %>%
+  mutate(
+    `Nearest Town` = str_trim(str_to_title(`Nearest Town`))  # Ensure NET towns are cleaned similarly
+  ) %>%
+  left_join(town_coords %>% select(town, lat, lng), by = c("Nearest Town" = "town"))
+
+# Debug: Check for lat and lng in NET
+message("Number of rows in NET with lat and lng after geocoding:")
+message("Non-NA lat values: ", sum(!is.na(NET$lat)))
+message("Non-NA lng values: ", sum(!is.na(NET$lng)))
 
 # Pre-process NET dataset
 NET <- NET %>%
@@ -520,9 +556,9 @@ server <- function(input, output, session) {
       # Render a basic map with a message
       leaflet() %>%
         addTiles() %>%
-        setView(lng = -98.5795, lat = 39.8283, zoom = 4) %>%
+        setView(lng = -99.9, lat = 41.5, zoom = 7) %>%
         addPopups(
-          lng = -98.5795, lat = 39.8283,
+          lng = -99.9, lat = 41.5,
           popup = "No geographic data available due to missing or invalid coordinates."
         )
     } else {
