@@ -1,0 +1,586 @@
+# Load required packages
+library(shiny)
+library(shinydashboard)
+library(plotly)
+library(leaflet)
+library(dplyr)
+library(tidyr)
+library(shinyWidgets)
+library(DT)
+library(readxl)  # For read_excel
+library(mapview) # For mapshot to download maps
+
+# Load the NET dataset
+NET <- read_excel("NETAwards.xlsx", sheet = "Awards")
+
+# Debug: Check for lat and lng columns in NET
+message("Checking NET dataset for lat and lng columns:")
+if ("lat" %in% names(NET)) {
+  message("lat column exists. Number of non-NA lat values: ", sum(!is.na(NET$lat)))
+} else {
+  message("lat column is missing in NET dataset")
+}
+if ("lng" %in% names(NET)) {
+  message("lng column exists. Number of non-NA lng values: ", sum(!is.na(NET$lng)))
+} else {
+  message("lng column is missing in NET dataset")
+}
+
+# If lat and lng are missing or all NA, generate fictional coordinates
+if (!("lat" %in% names(NET)) || !("lng" %in% names(NET)) || all(is.na(NET$lat)) || all(is.na(NET$lng))) {
+  message("lat and/or lng are missing or all NA. Generating fictional coordinates.")
+  # Get unique towns
+  unique_towns <- unique(NET$`Nearest Town`)
+  unique_towns <- unique_towns[!is.na(unique_towns) & unique_towns != ""]
+  
+  # Generate fictional coordinates (centered around lat 35, lng -80, roughly North Carolina, USA)
+  set.seed(123)  # For reproducibility
+  town_coords <- tibble(
+    `Nearest Town` = unique_towns,
+    lat = 35 + runif(length(unique_towns), -0.5, 0.5),
+    lng = -80 + runif(length(unique_towns), -0.5, 0.5)
+  )
+  
+  # Join coordinates to NET
+  NET <- NET %>%
+    left_join(town_coords, by = "Nearest Town")
+} else {
+  message("Using existing lat and lng columns in NET dataset.")
+}
+
+# Pre-process NET dataset
+NET <- NET %>%
+  mutate(
+    amount_expended_abs = abs(`Amount Expended`),
+    Taxable_land_purchase = replace(`Taxable Land Purchase`, is.na(`Taxable Land Purchase`), "No"),
+    Non_taxable_land_purchase = replace(`NON-Taxable Land Purchase`, is.na(`NON-Taxable Land Purchase`), "No"),
+    Purchased_capital_equipment = replace(`Purchased Capital Equipment`, is.na(`Purchased Capital Equipment`), "No")
+  )
+
+# Define UI
+ui <- dashboardPage(
+  dashboardHeader(title = "Go Environmental Trust: Funding Impact Dashboard"),
+  dashboardSidebar(
+    sidebarMenu(
+      menuItem("Funding Overview", tabName = "funding", icon = icon("dollar-sign")),
+      menuItem("Project Categories", tabName = "categories", icon = icon("project-diagram")),
+      menuItem("Trends Over Time", tabName = "trends", icon = icon("chart-line")),
+      menuItem("Geographic Impact", tabName = "geographic", icon = icon("map")),
+      menuItem("Project Activities", tabName = "activities", icon = icon("tasks"))
+    ),
+    sliderInput("year", "Select Year", min = 1992, max = 2020, value = 2020, step = 1, sep = ""),
+    pickerInput(
+      inputId = "group",
+      label = "Select Project Category",
+      choices = sort(unique(NET$Group)),
+      selected = sort(unique(NET$Group)),
+      multiple = TRUE,
+      options = list(
+        `actions-box` = TRUE,
+        `select-all-text` = "Select All",
+        `deselect-all-text` = "Deselect All",
+        `none-selected-text` = "No categories selected",
+        `dropup-auto` = FALSE
+      )
+    ),
+    selectizeInput("town", "Select Nearest Town", choices = sort(unique(NET$`Nearest Town`)), multiple = TRUE, options = list(maxItems = 10)),
+    sliderInput("counties_range", "Number of Counties Range", min = 0, max = 62, value = c(0, 62), step = 1),
+    checkboxGroupInput("activities", "Project Activities", choices = c("Taxable land purchase", "Non-taxable land purchase", "Purchased capital equipment")),
+    br(),
+    div(
+      style = "padding: 15px;",
+      h5("Contact Information:"),
+      h6("Andrew Hall"),
+      h6("Economic Data Analyst"),
+      p(style = "margin-bottom: 5px;", "Email: andrew.hall@TNC.ORG")
+    )
+  ),
+  dashboardBody(
+    tags$head(
+      tags$style(HTML("
+        body { width: 100% !important; }
+        /* Style for tables */
+        .overview-table table, .geographic-table table {
+          background: linear-gradient(to bottom, #f5f9f5, #e8f0e8);
+          border-radius: 10px;
+          box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+          border: 1px solid #2e7d32;
+          font-family: 'Arial', sans-serif;
+        }
+        .overview-table thead th, .geographic-table thead th {
+          background-color: #4caf50;
+          color: white;
+          font-weight: bold;
+          border-bottom: 2px solid #2e7d32;
+          padding: 12px;
+        }
+        .overview-table tbody td, .geographic-table tbody td {
+          padding: 12px;
+          border-bottom: 1px solid #dcedc8;
+        }
+        .overview-table tbody tr:nth-child(even), .geographic-table tbody tr:nth-child(even) {
+          background-color: #dcedc8;
+        }
+        .overview-table tbody tr:hover, .geographic-table tbody tr:hover {
+          background-color: #c8e6c9;
+        }
+        .overview-table .metric-cell {
+          font-weight: bold;
+          color: #2e7d32;
+          position: relative;
+          cursor: pointer;
+        }
+        /* Style for no-data message */
+        .no-data-message {
+          text-align: center;
+          color: #666;
+          font-style: italic;
+          margin-top: 20px;
+        }
+        /* Style for download buttons */
+        .download-btn {
+          margin-bottom: 10px;
+        }
+      ")),
+      tags$script(HTML("
+        $(document).ready(function() {
+          // Initialize Bootstrap tooltips
+          $('[data-toggle=\"tooltip\"]').tooltip({
+            placement: 'bottom',
+            container: 'body'
+          });
+        });
+      "))
+    ),
+    tabItems(
+      # Tab 1: Funding Overview
+      tabItem(tabName = "funding",
+              fluidRow(
+                valueBoxOutput("total_award", width = 6)
+              ),
+              fluidRow(
+                box(plotlyOutput("pie_chart"), title = "Funding Sources", width = 6),
+                box(
+                  title = uiOutput("funding_table_title"),
+                  width = 6,
+                  class = "overview-table",
+                  DTOutput("funding_overview_table")
+                )
+              ),
+              fluidRow(
+                box(plotlyOutput("spending_bar"), title = "Spending Efficiency (Top 10 Projects)", width = 12)
+              ),
+              fluidRow(
+                box(textOutput("note"), width = 12, title = "Note")
+              )
+      ),
+      # Tab 2: Project Categories
+      tabItem(tabName = "categories",
+              fluidRow(
+                valueBoxOutput("top_group"),
+                box(plotlyOutput("group_bar"), title = "Funding by Category", width = 12)
+              ),
+              fluidRow(
+                box(textOutput("category_note"), width = 12, title = "Note")
+              )
+      ),
+      # Tab 3: Trends Over Time
+      tabItem(tabName = "trends",
+              fluidRow(
+                valueBoxOutput("top_year"),
+                box(plotlyOutput("trend_line"), title = "Funding Trends Over Time", width = 12)
+              )
+      ),
+      # Tab 4: Geographic Impact
+      tabItem(tabName = "geographic",
+              fluidRow(
+                box(
+                  title = "Funding by Nearest Town",
+                  width = 12,
+                  class = "geographic-table",
+                  DTOutput("town_table")
+                )
+              ),
+              fluidRow(
+                box(
+                  title = "Project Locations",
+                  width = 12,
+                  leafletOutput("map", height = 400),
+                  downloadButton("downloadMap", "Download Map as PNG", class = "download-btn")
+                )
+              )
+      ),
+      # Tab 5: Project Activities
+      tabItem(tabName = "activities",
+              fluidRow(
+                valueBoxOutput("land_award"),
+                box(plotlyOutput("activity_bar"), title = "Funding by Project Activities", width = 12)
+              )
+      )
+    )
+  )
+)
+
+# Define Server
+server <- function(input, output, session) {
+  # Reactive data filtering
+  filtered_data <- reactive({
+    data <- NET
+    data <- data %>% filter(year == input$year)
+    if (!is.null(input$group) && length(input$group) > 0) {
+      data <- data %>% filter(Group %in% input$group)
+    }
+    if (!is.null(input$town)) {
+      data <- data %>% filter(`Nearest Town` %in% input$town)
+    }
+    if (!is.null(input$counties_range)) {
+      data <- data %>% filter(`Number Counties` >= input$counties_range[1] & `Number Counties` <= input$counties_range[2])
+    }
+    if (!is.null(input$activities)) {
+      if ("Taxable land purchase" %in% input$activities) {
+        data <- data %>% filter(Taxable_land_purchase == "Yes")
+      }
+      if ("Non-taxable land purchase" %in% input$activities) {
+        data <- data %>% filter(Non_taxable_land_purchase == "Yes")
+      }
+      if ("Purchased capital equipment" %in% input$activities) {
+        data <- data %>% filter(Purchased_capital_equipment == "Yes")
+      }
+    }
+    # Debug: Log the number of rows in filtered_data
+    message("Number of rows in filtered_data: ", nrow(data))
+    data
+  })
+  
+  # Tab 1: Funding Overview
+  output$funding_table_title <- renderUI({
+    paste("Overall Figures for", input$year)
+  })
+  
+  output$funding_overview_table <- renderDT({
+    data <- filtered_data()
+    
+    top_sponsor <- data %>%
+      group_by(Sponsor) %>%
+      summarise(Total_Match = sum(`Total Match Reported From Sponsors`, na.rm = TRUE)) %>%
+      arrange(desc(Total_Match)) %>%
+      slice_head(n = 1) %>%
+      mutate(
+        Metric = sprintf('<span class="metric-cell" data-toggle="tooltip" title="The sponsor who contributed the most additional funding to projects in the selected year.">Highest Sponsor</span>'),
+        Name = Sponsor,
+        Amount = paste0("$", format(Total_Match, big.mark = ","))
+      ) %>%
+      select(Metric, Name, Amount)
+    
+    top_category <- data %>%
+      group_by(Group) %>%
+      summarise(Total_Award = sum(`Award Amount`, na.rm = TRUE)) %>%
+      arrange(desc(Total_Award)) %>%
+      slice_head(n = 1) %>%
+      mutate(
+        Metric = sprintf('<span class="metric-cell" data-toggle="tooltip" title="The project category that received the most funding from GET in the selected year.">Highest Category</span>'),
+        Name = Group,
+        Amount = paste0("$", format(Total_Award, big.mark = ","))
+      ) %>%
+      select(Metric, Name, Amount)
+    
+    best_efficiency <- data %>%
+      mutate(Difference = abs(`Award Amount` - amount_expended_abs)) %>%
+      arrange(Difference) %>%
+      slice_head(n = 1) %>%
+      mutate(
+        Metric = sprintf('<span class="metric-cell" data-toggle="tooltip" title="The project that spent closest to the amount it was awarded, showing efficient use of funds.">Best Spending Efficiency</span>'),
+        Name = `Project Name`,
+        Amount = paste0("Difference: $", format(Difference, big.mark = ","))
+      ) %>%
+      select(Metric, Name, Amount)
+    
+    top_expended <- data %>%
+      arrange(desc(amount_expended_abs)) %>%
+      slice_head(n = 1) %>%
+      mutate(
+        Metric = sprintf('<span class="metric-cell" data-toggle="tooltip" title="The project that spent the most money on its activities in the selected year.">Highest Amount of Funds Expended</span>'),
+        Name = `Project Name`,
+        Amount = paste0("$", format(amount_expended_abs, big.mark = ","))
+      ) %>%
+      select(Metric, Name, Amount)
+    
+    overview_data <- bind_rows(
+      top_sponsor,
+      top_category,
+      best_efficiency,
+      top_expended
+    )
+    
+    datatable(
+      overview_data,
+      extensions = "Buttons",
+      options = list(
+        dom = "Bfrtip",  # Add buttons to the layout
+        buttons = list(
+          list(extend = "csv", filename = paste("Funding_Overview_", input$year, sep = "")),
+          list(extend = "excel", filename = paste("Funding_Overview_", input$year, sep = "")),
+          list(extend = "pdf", filename = paste("Funding_Overview_", input$year, sep = ""))
+        ),
+        pageLength = 4,
+        autoWidth = TRUE,
+        columnDefs = list(
+          list(width = "200px", targets = 0),
+          list(width = "300px", targets = 1),
+          list(width = "150px", targets = 2)
+        )
+      ),
+      rownames = FALSE,
+      escape = FALSE
+    )
+  })
+  
+  output$total_award <- renderValueBox({
+    total <- sum(filtered_data()$`Award Amount`, na.rm = TRUE)
+    valueBox(format(total, big.mark = ","), paste("Total Award Amount ($) -", input$year), icon = icon("dollar-sign"), color = "green")
+  })
+  
+  output$pie_chart <- renderPlotly({
+    funding <- filtered_data() %>%
+      summarise(
+        Awards = sum(`Award Amount`, na.rm = TRUE),
+        Match = sum(`Total Match Reported From Sponsors`, na.rm = TRUE)
+      ) %>%
+      pivot_longer(everything(), names_to = "Source", values_to = "Amount")
+    plot_ly(funding, labels = ~Source, values = ~Amount, type = "pie", marker = list(colors = c("#1F77B4", "#FF7F0E"))) %>%
+      layout(title = paste("Proportion of Funding -", input$year))
+  })
+  
+  output$spending_bar <- renderPlotly({
+    top_projects <- filtered_data() %>%
+      arrange(desc(`Award Amount`)) %>%
+      slice_head(n = 10) %>%
+      mutate(`Project Name` = stringr::str_wrap(`Project Name`, width = 18)) %>%
+      select(`Project Name`, `Award Amount`, amount_expended_abs) %>%
+      pivot_longer(c(`Award Amount`, amount_expended_abs), names_to = "Type", values_to = "Amount")
+    plot_ly(top_projects, x = ~`Project Name`, y = ~Amount, color = ~Type, type = "bar", colors = c("#1F77B4", "#2CA02C")) %>%
+      layout(barmode = "group", xaxis = list(title = "Project", tickangle = 45), yaxis = list(title = "Amount ($)"))
+  })
+  
+  output$note <- renderText({
+    "Note: Amount Expended is negative to indicate spending; absolute values are shown in visuals."
+  })
+  
+  # Tab 2: Project Categories
+  output$top_group <- renderValueBox({
+    top <- filtered_data() %>%
+      group_by(Group) %>%
+      summarise(Total = sum(`Award Amount`, na.rm = TRUE)) %>%
+      arrange(desc(Total)) %>%
+      slice_head(n = 1)
+    valueBox(top$Group, paste("Top Category: $", format(top$Total, big.mark = ","), "-", input$year), icon = icon("chart-bar"), color = "purple")
+  })
+  
+  output$group_bar <- renderPlotly({
+    group_data <- filtered_data() %>%
+      group_by(Group) %>%
+      summarise(
+        Awards = sum(`Award Amount`, na.rm = TRUE),
+        Match = sum(`Total Match Reported From Sponsors`, na.rm = TRUE)
+      ) %>%
+      pivot_longer(c(Awards, Match), names_to = "Type", values_to = "Amount")
+    plot_ly(group_data, x = ~Group, y = ~Amount, color = ~Type, type = "bar", colors = c("#1F77B4", "#FF7F0E")) %>%
+      layout(barmode = "group", xaxis = list(title = "Category", tickangle = 45), yaxis = list(title = "Amount ($)"))
+  })
+  
+  output$category_note <- renderText({
+    "Note: 'Statement of Intent' is a significant category with substantial funding, which may dominate the visualization."
+  })
+  
+  # Tab 3: Trends Over Time
+  output$top_year <- renderValueBox({
+    top <- NET %>%
+      group_by(year) %>%
+      summarise(Total = sum(`Award Amount`, na.rm = TRUE)) %>%
+      arrange(desc(Total)) %>%
+      slice_head(n = 1)
+    valueBox(top$year, paste("Top Year: $", format(top$Total, big.mark = ",")), icon = icon("calendar"), color = "orange")
+  })
+  
+  output$trend_line <- renderPlotly({
+    trend_data <- NET %>%
+      group_by(year) %>%
+      summarise(
+        Awards = sum(`Award Amount`, na.rm = TRUE),
+        Match = sum(`Total Match Reported From Sponsors`, na.rm = TRUE)
+      ) %>%
+      complete(year = seq(1992, 2020, by = 1), fill = list(Awards = 0, Match = 0)) %>%
+      pivot_longer(c(Awards, Match), names_to = "Type", values_to = "Amount")
+    plot_ly(trend_data, x = ~year, y = ~Amount, color = ~Type, type = "scatter", mode = "lines+markers", colors = c("#1F77B4", "#FF7F0E")) %>%
+      layout(
+        xaxis = list(title = "Year"),
+        yaxis = list(title = "Amount ($)"),
+        shapes = list(
+          list(
+            type = "line",
+            x0 = input$year, x1 = input$year,
+            y0 = 0, y1 = max(trend_data$Amount, na.rm = TRUE),
+            line = list(color = "red", dash = "dash")
+          )
+        )
+      )
+  })
+  
+  # Tab 4: Geographic Impact
+  output$town_table_ui <- renderUI({
+    data <- filtered_data()
+    if (nrow(data) == 0) {
+      div(class = "no-data-message", "No projects match the selected filters.")
+    } else {
+      DTOutput("town_table")
+    }
+  })
+  
+  output$town_table <- renderDT({
+    data <- filtered_data()
+    
+    town_data <- data %>%
+      group_by(`Nearest Town`) %>%
+      summarise(
+        `Number of Projects` = n(),
+        `Total Amount of Award` = sum(`Award Amount`, na.rm = TRUE),
+        `Total Match Reported from Sponsors` = sum(`Total Match Reported From Sponsors`, na.rm = TRUE)
+      ) %>%
+      mutate(
+        `Total Amount of Award` = paste0("$", format(`Total Amount of Award`, big.mark = ",")),
+        `Total Match Reported from Sponsors` = paste0("$", format(`Total Match Reported from Sponsors`, big.mark = ","))
+      ) %>%
+      arrange(desc(`Total Amount of Award`))
+    
+    datatable(
+      town_data,
+      extensions = "Buttons",
+      options = list(
+        dom = "Bfrtip",
+        buttons = list(
+          list(extend = "csv", filename = paste("Geographic_Impact_", input$year, sep = "")),
+          list(extend = "excel", filename = paste("Geographic_Impact_", input$year, sep = "")),
+          list(extend = "pdf", filename = paste("Geographic_Impact_", input$year, sep = ""))
+        ),
+        autoWidth = TRUE,
+        columnDefs = list(
+          list(width = "200px", targets = 0),
+          list(width = "150px", targets = 1),
+          list(width = "200px", targets = 2),
+          list(width = "250px", targets = 3)
+        ),
+        order = list(list(2, "desc"))
+      ),
+      rownames = FALSE
+    )
+  })
+  
+  output$map_ui <- renderUI({
+    data <- filtered_data()
+    if (nrow(data) == 0) {
+      div(class = "no-data-message", "No projects match the selected filters.")
+    } else {
+      leafletOutput("map", height = 400)
+    }
+  })
+  
+  # Store the map as a reactive value so it can be accessed by the download handler
+  map_reactive <- reactive({
+    data <- filtered_data()
+    
+    # Debug: Check lat and lng availability
+    message("Number of rows with non-NA lat: ", sum(!is.na(data$lat)))
+    message("Number of rows with non-NA lng: ", sum(!is.na(data$lng)))
+    
+    # Filter out rows with NA or empty Nearest Town
+    data <- data %>% filter(!is.na(`Nearest Town`) & `Nearest Town` != "")
+    
+    map_data <- data %>%
+      group_by(`Nearest Town`) %>%
+      summarise(
+        Award = sum(`Award Amount`, na.rm = TRUE),
+        Num_Projects = n(),
+        lat = mean(lat, na.rm = TRUE),
+        lng = mean(lng, na.rm = TRUE)
+      ) %>%
+      filter(
+        !is.na(lat) & !is.na(lng) & # Remove NA coordinates
+          is.finite(lat) & is.finite(lng) & # Remove NaN or Inf
+          Award > 0 # Ensure Award is positive for radius
+      )
+    
+    # Debug: Log the number of rows in map_data and inspect data
+    message("Number of rows in map_data after filtering: ", nrow(map_data))
+    if (nrow(map_data) > 0) {
+      message("Sample of map_data: ")
+      print(head(map_data))
+    }
+    
+    if (nrow(map_data) == 0) {
+      # Render a basic map with a message
+      leaflet() %>%
+        addTiles() %>%
+        setView(lng = -98.5795, lat = 39.8283, zoom = 4) %>%
+        addPopups(
+          lng = -98.5795, lat = 39.8283,
+          popup = "No geographic data available due to missing or invalid coordinates."
+        )
+    } else {
+      leaflet(data = map_data) %>%
+        addTiles() %>%
+        addCircles(
+          lng = ~lng,
+          lat = ~lat,
+          radius = ~Award / 1000,
+          color = "#2CA02C",
+          popup = ~paste(`Nearest Town`, ": $", format(Award, big.mark = ","), " (", Num_Projects, " projects)")
+        ) %>%
+        addLegend(
+          position = "bottomright",
+          title = "Award Amount",
+          colors = "#2CA02C",
+          labels = "Size by $"
+        )
+    }
+  })
+  
+  output$map <- renderLeaflet({
+    map_reactive()
+  })
+  
+  # Download handler for the map
+  output$downloadMap <- downloadHandler(
+    filename = function() {
+      paste("Project_Locations_", input$year, "_map.png", sep = "")
+    },
+    content = function(file) {
+      # Use mapshot to save the map as a PNG
+      map <- map_reactive()
+      mapshot(map, file = file, vwidth = 800, vheight = 400)
+    }
+  )
+  
+  # Tab 5: Project Activities
+  output$land_award <- renderValueBox({
+    land <- filtered_data() %>%
+      filter(Taxable_land_purchase == "Yes" | Non_taxable_land_purchase == "Yes") %>%
+      summarise(Total = sum(`Award Amount`, na.rm = TRUE)) %>%
+      pull(Total)
+    valueBox(format(land, big.mark = ","), paste("Awards for Land Purchases ($) -", input$year), icon = icon("tree"), color = "green")
+  })
+  
+  output$activity_bar <- renderPlotly({
+    activity_data <- filtered_data() %>%
+      summarise(
+        `Taxable Land` = sum(`Award Amount`[Taxable_land_purchase == "Yes"], na.rm = TRUE),
+        `Non-taxable Land` = sum(`Award Amount`[Non_taxable_land_purchase == "Yes"], na.rm = TRUE),
+        Equipment = sum(`Award Amount`[Purchased_capital_equipment == "Yes"], na.rm = TRUE)
+      ) %>%
+      pivot_longer(everything(), names_to = "Activity", values_to = "Amount")
+    plot_ly(activity_data, x = ~Activity, y = ~Amount, type = "bar", marker = list(color = c("#2CA02C", "#2CA02C", "#A9A9A9"))) %>%
+      layout(xaxis = list(title = "Activity"), yaxis = list(title = "Total Award ($)"))
+  })
+}
+
+# Run the app
+shinyApp(ui, server)
