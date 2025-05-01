@@ -1,19 +1,17 @@
 ##ODA BY Sectors
 
+#SectorsODA <- read.csv("/Users/trumu/Desktop/TNC/Data/ODasectors.csv")
 
+SectorsODA <- read.csv("ODasectors.csv")
 
-SectorsODA<- read.csv("ODasectors.csv")
 # Remove columns that have any NA values
 SectorsODA <- SectorsODA[, colSums(is.na(SectorsODA)) == 0]
 
-##Donor, Recipient, SECTOR, Sector, MEASURE,Measure, MARKER, Marker TIME_PERIOD OBS_VALUE
-
 # List of columns you want to keep
-columns_to_keep <- c("Donor", "Recipient", "SECTOR" ,"Sector", "MEASURE", "Measure", "MARKER", "Marker", "TIME_PERIOD", "OBS_VALUE")
+columns_to_keep <- c("Donor", "Recipient", "SECTOR", "Sector", "MEASURE", "Measure", "MARKER", "Marker", "TIME_PERIOD", "OBS_VALUE")
 
 # Subset your data to keep only the specified columns
 data <- SectorsODA[, columns_to_keep]
-
 
 # Load required packages
 library(shiny)
@@ -79,11 +77,11 @@ ui <- dashboardPage(
                 valueBoxOutput("top_sector", width = 4)
               ),
               fluidRow(
-                box(title = "Who Gives or Gets the Funding?", width = 6,
+                box(title = uiOutput("overview_bar_title"), width = 6,
                     selectInput("overview_by", "Show by:", choices = c("Donors", "Recipients"), selected = "Donors"),
                     plotlyOutput("overview_bar"),
                     tags$div(style = "font-size: 14px; padding: 10px;", "This shows who gives or gets the funding.")),
-                box(title = "Which Sectors Get the Most Funding?", width = 6,
+                box(title = uiOutput("overview_pie_title"), width = 6,
                     plotlyOutput("overview_pie"),
                     tags$div(style = "font-size: 14px; padding: 10px;", "This shows how funding is split across sectors."))
               )
@@ -91,12 +89,12 @@ ui <- dashboardPage(
       # Sectors Tab
       tabItem(tabName = "sectors",
               fluidRow(
-                box(title = "Funding by Sector", width = 12,
+                box(title = uiOutput("sector_bar_title"), width = 12,
                     plotlyOutput("sector_bar", height = "600px"),
                     tags$div(style = "font-size: 14px; padding: 10px;", "This shows which sectors get the most funding."))
               ),
               fluidRow(
-                box(title = "Funding by Sector and Environmental Goal", width = 12,
+                box(title = uiOutput("sector_stacked_bar_title"), width = 12,
                     plotlyOutput("sector_stacked_bar", height = "600px"),
                     tags$div(style = "font-size: 14px; padding: 10px;", "This shows how funding for each sector supports environmental goals."))
               )
@@ -116,6 +114,42 @@ server <- function(input, output, session) {
     if (!"All Sectors" %in% input$sector) dt <- dt[Sector %in% input$sector]
     if (!"All Environmental Goals" %in% input$marker) dt <- dt[Marker %in% input$marker]
     dt
+  })
+  
+  # Helper function to format year suffix for chart titles
+  year_suffix <- reactive({
+    if ("All Years" %in% input$year) {
+      return("(All Years)")
+    } else {
+      years <- sort(as.numeric(input$year))
+      if (length(years) == 1) {
+        return(paste("in", years))
+      } else {
+        # Check if years are consecutive
+        if (all(diff(years) == 1)) {
+          return(paste("in", paste(min(years), max(years), sep = "-")))
+        } else {
+          return(paste("in", paste(years, collapse = ", ")))
+        }
+      }
+    }
+  })
+  
+  # Dynamic chart titles
+  output$overview_bar_title <- renderUI({
+    paste("Who Gives or Gets the Funding?", year_suffix())
+  })
+  
+  output$overview_pie_title <- renderUI({
+    paste("Which Sectors Get the Most Funding?", year_suffix())
+  })
+  
+  output$sector_bar_title <- renderUI({
+    paste("Funding by Sector", year_suffix())
+  })
+  
+  output$sector_stacked_bar_title <- renderUI({
+    paste("Funding by Sector and Environmental Goal", year_suffix())
   })
   
   # Overview Tab: Summary Boxes
