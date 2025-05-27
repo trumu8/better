@@ -1,0 +1,98 @@
+#Working on DCF
+#These codes are for looking at ODA from top 10 & 5 donors to our 4 countries of interest
+
+Data<- read.csv("DACCountries.csv")%>%
+  mutate(
+    TIME_PERIOD = as.numeric(TIME_PERIOD),
+    OBS_VALUE = as.numeric(OBS_VALUE),
+    Measure = factor(Measure,
+                     levels = c("Official development assistance (ODA), disbursements",
+                                "Humanitarian aid",
+                                "Development food aid")))
+
+getwd()
+setwd("/Users/trumu/Desktop/TNC/PLAT")
+
+# Define target recipient countries
+target_recipients <- c("Congo", "Belize", "Ecuador", "El Salvador")
+
+# Filter data for target recipients and summarize top 10 donors
+top_donors <- Data %>%
+  filter(Recipient %in% target_recipients,
+         Donor != "DAC countries") %>%
+  group_by(Recipient, Donor) %>%
+  summarise(Total_Aid = sum(OBS_VALUE, na.rm = TRUE), .groups = "drop") %>%
+  arrange(Recipient, desc(Total_Aid)) %>%
+  group_by(Recipient) %>%
+  slice_head(n = 10) %>%
+  mutate(Total_Aid = round(Total_Aid, 2),
+         Total_Aid = format(Total_Aid, big.mark = ",")) %>%
+  rename("Recipient Country" = Recipient,
+         "Donor" = Donor,
+         "Total Aid (Millions USD)" = Total_Aid)
+
+----------------------------------------------------
+  fivetop_donors <- Data %>%
+  filter(Recipient %in% target_recipients,
+         Donor != "DAC countries") %>%
+  group_by(Recipient, Donor) %>%
+  summarise(Total_Aid = sum(OBS_VALUE, na.rm = TRUE), .groups = "drop") %>%
+  arrange(Recipient, desc(Total_Aid)) %>%
+  group_by(Recipient) %>%
+  slice_head(n = 5) %>%
+  mutate(Total_Aid = round(Total_Aid, 2))
+
+
+
+
+
+
+custom_colors <- c(
+  "United States" = "#8A9A5B", # Leaf green
+  "Canada" = "#4A2C2A",       # Earth brown
+  "Germany" = "#1A3C34",      # Pine green
+  "France" = "#1A3C5A",       # Benthic blue
+  "Italy" = "#D4A017",        # Complementary yellow
+  "Japan" = "#05641C",        # Same as Italy for now
+  "Spain" = "#FFD700",
+  "United Kingdom" = "#D4A017",
+  "Korea" = "#D4A017"
+)
+
+
+
+p <- ggplot(fivetop_donors, aes(x = Recipient, y = Total_Aid, fill = Donor, text = paste(Donor, ": $", Total_Aid, "M"))) +
+  geom_bar(stat = "identity", position = "stack", width = 0.7, color = "gray30", size = 0.2) +
+  scale_fill_manual(values = custom_colors, name = "Top Donors") +
+  scale_y_continuous(
+    breaks = seq(0, 4000, by = 1000), 
+    limits = c(0, 4000), 
+    expand = c(0, 0),
+    labels = scales::label_number(suffix = "M") # Add "M" to tick labels
+) +
+  labs(title = "Top 5 Donors",
+       x = "Recipient Country",
+       y = "Total Aid (Millions USD)",
+       caption = paste("Data Source: OECD Data Portal (https://www.oecd.org/en/topics/sub-issues/oda-trends-and-statistics.html)",
+                       "\nODA funds by Sectors: https://cutie.shinyapps.io/ODAsectors/")) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    axis.title = element_text(size = 10, face = "bold"),
+    axis.text.x = element_text(size = 9, face = "bold"),
+    axis.text.y = element_text(size = 8),
+    plot.caption = element_text(hjust = 0, size = 8, face = "italic"),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_blank(),
+    legend.position = "right",
+    legend.title = element_text(size = 10, face = "bold"),
+    legend.text = element_text(size = 8),
+    plot.margin = margin(t = 20, r = 20, b = 20, l = 20),
+    panel.border = element_rect(color = "gray30", fill = NA, size = 0.5)
+  )
+# Create interactive plot with plotly
+p_interactive <- ggplotly(p, tooltip = "text")
+
+# Display the interactive plot
+p_interactive
