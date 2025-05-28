@@ -1,0 +1,135 @@
+#ODA BY SECTORS
+
+# Load required packages
+library(data.table)
+library(ggplot2)
+library(plotly)
+# Load and preprocess the data
+SectorsODA <- read.csv("/Users/trumu/Desktop/TNC/Data/ODasectors.csv")
+
+# Remove columns with any NA values
+SectorsODA <- SectorsODA[, colSums(is.na(SectorsODA)) == 0]
+
+# Keep relevant columns (update 'Marker' to match the actual column name after debugging)
+columns_to_keep <- c("Donor", "Recipient", "TIME_PERIOD", "OBS_VALUE", "Marker")
+data <- SectorsODA[, columns_to_keep, drop = FALSE]
+
+# Convert to data.table and ensure correct types
+setDT(data)
+data[, `:=`(OBS_VALUE = as.numeric(OBS_VALUE), TIME_PERIOD = as.numeric(TIME_PERIOD))]
+
+# Filter for US as donor and specified recipient countries (across all years)
+# Update recipient names to match dataset
+plot_data <- data[Donor == "United States" & 
+                    Recipient %in% c("Congo", "Belize", "Ecuador", "El Salvador")]
+
+# Check if plot_data has data
+print("Number of rows in plot_data after filtering:")
+print(nrow(plot_data))
+
+# Aggregate ODA by Recipient and Marker (environmental goal) across all years
+oda_by_recipient_goal <- plot_data[, .(Total = sum(OBS_VALUE, na.rm = TRUE)), by = .(Recipient, Marker)]
+
+# Check the aggregated data
+print("Aggregated data (oda_by_recipient_goal):")
+print(oda_by_recipient_goal)
+
+## Reorder Marker by Total (descending) WITHIN EACH Recipient group
+oda_by_recipient_goal <- oda_by_recipient_goal %>%
+  arrange(Recipient, -Total) %>%  # Sort by Recipient and descending Total
+  mutate(Marker = factor(Marker, levels = unique(Marker)))  # Lock in order
+
+# Create the stacked bar chart (largest segments now at bottom)
+p3 <- ggplot(oda_by_recipient_goal, aes(x = Recipient, y = Total, fill = Marker)) +
+  geom_bar(
+    stat = "identity", 
+    position = "stack", 
+    width = 0.7,           # Slightly wider bars
+    color = "white",       # White borders between segments
+    linewidth = 0.3        # Thin border for clean separation
+  ) +
+  labs(
+    title = "",
+    x = NULL,              # Remove redundant x-axis label
+    y = "ODA (Millions USD)"
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, 200, by = 50),
+    limits = c(0, 200),
+    labels = scales::comma_format(suffix = "M"),  # Clean "$X M" format
+    expand = c(0, 0)       # Remove padding at axis edges
+  ) +
+  scale_fill_manual(
+    values = c(
+      "Environment" = "#05641c",           # Dark green
+      "Climate change adaptation" = "#381300", # Deep brown
+      "Biodiversity" = "#FFC700",          # Vibrant gold
+      "Climate change mitigation" = "#01C1E3", # Bright teal
+      "Desertification" = "#9467bd"        # Soft purple
+    ),
+    name = "Environmental Goal",           # Legend title
+    guide = guide_legend(reverse = TRUE)   # Legend matches stack order
+  ) +
+  theme_minimal(base_size = 12) +          # Larger base font
+  theme(
+    # Title
+    plot.title = element_text(
+      size = 16, 
+      face = "bold", 
+      hjust = 0.5, 
+      margin = margin(b = 10)  # Add space below title
+    ),
+    # Axes
+    axis.title.y = element_text(
+      size = 12, 
+      face = "bold", 
+      color = "gray30"
+    ),
+    axis.text.x = element_text(
+      size = 11, 
+      face = "bold", 
+      angle = 45, 
+      hjust = 1, 
+      color = "gray30"
+    ),
+    axis.text.y = element_text(
+      size = 10, 
+      color = "gray30"
+    ),
+    # Gridlines
+    panel.grid.major.x = element_blank(),  # Remove vertical gridlines
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_line(
+      color = "gray90", 
+      linewidth = 0.3      # Light horizontal gridlines
+    ),
+    # Legend
+    legend.position = "right",
+    legend.title = element_text(
+      face = "bold", 
+      size = 11
+    ),
+    legend.text = element_text(size = 10),
+    # Caption
+    plot.caption = element_text(
+      size = 9, 
+      color = "gray50", 
+      hjust = 0,           # Left-align caption
+      margin = margin(t = 10)
+    ),
+    # Background
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA)
+  )
+
+# Interactive version (unchanged from your original)
+p_plotly <- ggplotly(p3, tooltip = c("x", "fill", "y")) %>%
+  layout(
+    hoverlabel = list(
+      bgcolor = "white",    # Clean tooltip background
+      font = list(size = 12)
+    )
+  )
+p_plotly <- ggplotly(p3, tooltip = c("x", "fill", "y"))
+p_plotly
+--------------------------
