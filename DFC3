@@ -1,0 +1,167 @@
+# FOR TRADE
+
+getwd()
+
+Trade <- readxl::read_excel("country.xlsx")
+
+#Filtering out the countries of interest
+country_names <- c("Belize", "Congo", "Ecuador", "El Salvador")
+
+Trade_Cleaned <- Trade %>%
+  filter(tolower(CTYNAME) %in% tolower(country_names)) %>%
+  # Select relevant columns for charts
+  select(year, CTY_CODE, CTYNAME, IYR, EYR)
+
+-------
+  
+  library(dplyr)
+library(ggplot2)
+
+# Filter data for 2000-2025 and aggregate totals by country
+Trade_Summary <- Trade_Cleaned %>%
+  filter(year >= 2000 & year <= 2025) %>%
+  group_by(CTYNAME) %>%
+  summarize(
+    Total_Imports = sum(IYR, na.rm = TRUE),
+    Total_Exports = sum(EYR, na.rm = TRUE)
+  ) %>%
+  tidyr::pivot_longer(
+    cols = c(Total_Imports, Total_Exports),
+    names_to = "Trade_Type",
+    values_to = "Trade_Value"
+  )
+
+# Plot grouped bar chart
+ggplot(Trade_Summary, aes(x = CTYNAME, y = Trade_Value, fill = Trade_Type)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+  scale_fill_manual(values = c("Total_Imports" = "#1f77b4", "Total_Exports" = "#ff7f0e")) +
+  labs(
+    title = "Total Imports vs. Exports (2000-2025)",
+    x = "Country",
+    y = "Trade Value ($)",
+    fill = "Trade Type"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+----------------------------
+  library(dplyr)
+library(ggplot2)
+library(scales)  # For formatting numbers
+
+# 1. Filter data (2000-2025) and aggregate
+Trade_Summary <- Trade_Cleaned %>%
+  filter(year >= 2000 & year <= 2025) %>%
+  group_by(CTYNAME) %>%
+  summarize(
+    Total_Imports = sum(IYR, na.rm = TRUE),  # Values in millions
+    Total_Exports = sum(EYR, na.rm = TRUE)
+  ) %>%
+  tidyr::pivot_longer(
+    cols = c(Total_Imports, Total_Exports),
+    names_to = "Trade_Type",
+    values_to = "Trade_Value_Millions"  # Rename for clarity
+  ) %>%
+  mutate(
+    # Convert millions to billions for labels
+    Trade_Value_Billions = Trade_Value_Millions / 1000,
+    # Format labels dynamically (e.g., "1.3B")
+    Label = ifelse(
+      Trade_Value_Millions >= 1000,
+      paste0(round(Trade_Value_Billions, 1), "B"),
+      paste0(round(Trade_Value_Millions, 1), "M")
+    ),
+    # Fix country names
+    CTYNAME = case_when(
+      tolower(CTYNAME) == "bankize" ~ "Belize",
+      tolower(CTYNAME) == "compo" ~ "Congo",
+      TRUE ~ CTYNAME
+    ),
+    # Simplify legend
+    Trade_Type = ifelse(
+      Trade_Type == "Total_Imports", "Imports", "Exports"
+    )
+  )
+
+# 2. Plot
+ggplot(Trade_Summary, aes(x = CTYNAME, y = Trade_Value_Billions, fill = Trade_Type)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+  geom_text(
+    aes(label = Label),
+    position = position_dodge(width = 0.8),
+    vjust = -0.5,
+    size = 3.5,
+    fontface = "bold"
+  ) +
+  scale_fill_manual(values = c("Imports" = "#1f77b4", "Exports" = "#ff7f0e")) +
+  scale_y_continuous(
+    labels = scales::label_number(suffix = "B"),
+    expand = expansion(mult = c(0, 0.1))
+  ) +
+  labs(
+    title = "Total Imports vs. Exports (2000–2025)",
+    x = "",
+    y = "Trade Value (Billions USD)",
+    fill = "Trade Type"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+    legend.position = "right"
+  )
+
+-------------------------------------
+#Trade Deficit
+
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+# 1. Calculate annual trade deficit (2000-2025)
+Trade_Deficit <- Trade_Cleaned %>%
+  filter(year >= 2000 & year <= 2025) %>%
+  mutate(
+    Trade_Deficit = IYR - EYR,  # Positive = deficit, Negative = surplus
+    CTYNAME = case_when(        # Fix country names
+      tolower(CTYNAME) == "bankize" ~ "Belize",
+      tolower(CTYNAME) == "compo" ~ "Congo",
+      TRUE ~ CTYNAME
+    )
+  )
+
+Trade_Deficit <- Trade_Deficit %>%
+  mutate(year = as.numeric(year))  # Force conversion to numeric
+# 2. Plot trend over time (line chart)
+ggplot(Trade_Deficit, aes(x = year, y = Trade_Deficit / 1000, color = CTYNAME, group = CTYNAME)) +  # Convert to billions
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  scale_y_continuous(
+    labels = label_number(suffix = "B"),  # Now shows "B" for billions
+    breaks = scales::pretty_breaks(n = 8)
+  ) +
+  scale_color_manual(values = c("#4E79A7", "#F28E2B", "#E15759", "#76B7B2")) +
+  labs(
+    title = "Trade Deficit Trend (2000-2025)",
+    subtitle = "Positive values = Deficit | Negative values = Surplus",
+    x = "Year",
+    y = "Trade Deficit (Billions USD)",  # Updated axis label
+    color = "Country"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5, color = "gray40"),
+    legend.position = "bottom"
+  )
+
+
+
+ggplot(Trade_Deficit, aes(x = year, y = Trade_Deficit / 1000)) +  # Convert to billions
+  geom_line(aes(color = CTYNAME), linewidth = 1) +
+  facet_wrap(~CTYNAME) +  # One panel per country
+  labs(y = "Trade Deficit (Billions USD)")  
