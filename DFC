@@ -96,3 +96,398 @@ p_interactive <- ggplotly(p, tooltip = "text")
 
 # Display the interactive plot
 p_interactive
+---------------------------------------------------------------------------------------------------------------
+####Corrections
+
+
+
+# us_oda_trend_2002_2023.R
+# Load required packages
+library(data.table)
+library(ggplot2)
+
+# Load the Grand ODA data
+GrandODA<- read.csv("DACCountries.csv")%>%
+  mutate(
+    TIME_PERIOD = as.numeric(TIME_PERIOD),
+    OBS_VALUE = as.numeric(OBS_VALUE),
+    Measure = factor(Measure,
+                     levels = c("Official development assistance (ODA), disbursements",
+                                "Humanitarian aid",
+                                "Development food aid")))
+
+
+# Remove columns with any NA values
+GrandODA <- GrandODA[, colSums(is.na(GrandODA)) == 0]
+
+# Keep relevant columns
+columns_to_keep <- c("Donor", "Recipient", "TIME_PERIOD", "OBS_VALUE")
+Data <- GrandODA[, columns_to_keep, drop = FALSE]
+
+# Convert to data.table and ensure correct types
+setDT(Data)
+Data[, `:=`(OBS_VALUE = as.numeric(OBS_VALUE), TIME_PERIOD = as.numeric(TIME_PERIOD))]
+
+# Filter for US as donor, specified recipient countries, and years 2002-2023
+plot_Data <- Data[Donor == "United States" & 
+                    Recipient %in% c("Gabon", "Belize", "Ecuador", "El Salvador") & 
+                    TIME_PERIOD >= 2002 & TIME_PERIOD <= 2023]
+
+# Check if plot_data has data
+print("Number of rows in plot_data after filtering:")
+print(nrow(plot_Data))
+
+# Aggregate ODA by Recipient and TIME_PERIOD (in case there are multiple entries per year)
+Databy_recipient_year <- plot_Data[, .(Total = sum(OBS_VALUE, na.rm = TRUE)), by = .(Recipient, TIME_PERIOD)]
+
+# Check the aggregated data
+print("Aggregated data (oda_by_recipient_year):")
+print(oda_by_recipient_year)
+
+# Create the line graph
+library(ggplot2)
+library(plotly)
+
+p <- ggplot(Databy_recipient_year, aes(x = TIME_PERIOD, y = Total, color = Recipient)) +
+  geom_line(size = 1, lineend = "round") +
+  geom_point(size = 2.5, alpha = 0.8) +
+  labs(
+    title = "U.S. Official Development Assistance (2002-2023)",
+    subtitle = "Total ODA Disbursements to Select Countries",
+    x = "", 
+    y = "ODA ($ Millions)",
+    caption = "Source: U.S. Agency for International Development"
+  ) +
+  scale_y_continuous(labels = scales::comma, expand = expansion(mult = c(0.05, 0.1))) +
+  scale_x_continuous(breaks = seq(2002, 2023, by = 3), expand = expansion(mult = 0.02)) +
+  scale_color_manual(
+    values = c(
+      "Gabon" = "#1f77b4",
+      "Belize" = "#ff7f0e",
+      "Ecuador" = "#2ca02c",
+      "El Salvador" = "#d62728"
+    ),
+    name = "Recipient Country"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5, margin = margin(b = 15)),
+    axis.text.x = element_text(angle = 45, hjust = 1, face = "bold"),
+    axis.title.y = element_text(margin = margin(r = 10)),
+    axis.text.y = element_text(face = "bold"),
+    legend.position = "right",
+    legend.title = element_text(face = "bold"),
+    legend.text = element_text(size = 10),
+    plot.caption = element_text(margin = margin(t = 10), hjust = 1),
+    panel.grid.major = element_line(color = "grey90"),
+    panel.grid.minor = element_blank(),
+    plot.background = element_rect(fill = "white", color = "grey30", size = 0.5),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.margin = margin(15, 15, 15, 15)
+  )
+
+# Convert to plotly with enhanced tooltips
+p_plotly <- ggplotly(p, tooltip = c("x", "color", "y")) %>% 
+  layout(
+    hoverlabel = list(
+      bgcolor = "white",
+      font = list(family = "Arial", size = 12),
+      bordercolor = "grey"
+    ),
+    margin = list(t = 60) # Add top margin for title
+  )
+
+p_plotly
+
+
+-----------------------------------------------------------------------------------
+
+  # us_oda_environmental_trend_2002_2023.R
+  
+------------------------------------------------------------------------------------  
+  # us_oda_environmental_trend_2002_2023.R
+  # Load required packages
+  library(data.table)
+library(ggplot2)
+library(plotly)
+
+# Load and preprocess the data
+SectorsODA <- read.csv("/Users/trumu/Desktop/TNC/Data/ODASectors.csv")
+
+# Print column names to debug
+print("Column names in SectorsODA:")
+print(colnames(SectorsODA))
+
+# Remove columns with any NA values
+SectorsODA <- SectorsODA[, colSums(is.na(SectorsODA)) == 0]
+
+# Keep relevant columns
+columns_to_keep <- c("Donor", "Recipient", "TIME_PERIOD", "OBS_VALUE", "Marker")
+data <- SectorsODA[, columns_to_keep, drop = FALSE]
+
+# Convert to data.table and ensure correct types
+setDT(data)
+data[, `:=`(OBS_VALUE = as.numeric(OBS_VALUE), TIME_PERIOD = as.numeric(TIME_PERIOD))]
+
+# Filter for US as donor, specified recipient countries, and years 2002-2023
+data <- data[Donor == "United States" & 
+               Recipient %in% c("Gabon", "Belize", "Ecuador", "El Salvador") & 
+               TIME_PERIOD >= 2002 & TIME_PERIOD <= 2023]
+
+# Check if data has rows after initial filtering
+print("Number of rows in data after initial filtering:")
+print(nrow(data))
+
+# Check unique Marker values to confirm environmental goals
+print("Unique Marker values in data:")
+print(unique(data$Marker))
+
+# Ensure only environmental ODA is included (filter for valid markers)
+data <- data[Marker %in% c("Environment", "Climate change adaptation", "Biodiversity", 
+                           "Climate change mitigation", "Desertification")]
+
+# Check if data has rows after Marker filtering
+print("Number of rows in data after Marker filtering:")
+print(nrow(data))
+
+# If no data, stop with a message
+if (nrow(data) == 0) {
+  stop("No data available after filtering. Check the Donor, Recipient, TIME_PERIOD, or Marker values.")
+}
+
+# Aggregate ODA by Recipient and TIME_PERIOD, combining all markers into "Environmental Goal"
+plot_data <- data[, .(Total = sum(OBS_VALUE, na.rm = TRUE)), by = .(Recipient, TIME_PERIOD)]
+
+# Check the aggregated data
+print("Aggregated data (plot_data):")
+print(plot_data)
+
+# If no data after aggregation, stop with a message
+if (nrow(plot_data) == 0) {
+  stop("No data available after aggregation. Check the data for inconsistencies.")
+}
+
+
+# Load required libraries
+library(ggplot2)
+library(plotly)
+library(ggtext)  # For HTML/markdown text formatting
+library(scales)   # For comma formatting on y-axis
+
+# Create the ggplot with enhanced styling
+p <- ggplot(plot_data, aes(x = TIME_PERIOD, y = Total, color = Recipient)) +
+  geom_line(size = 1, lineend = "round") +
+  geom_point(size = 2.5, alpha = 0.8) +
+  labs(
+    title = "<b>U.S. ODA (2002–2023)</b><br><span style='font-size:12px; color:grey60'>Funds Allocated to Environmental Projects</span>",
+    x = "Year", 
+    y = "ODA ($ Millions)",
+    caption = "Source: U.S. Agency for International Development"
+  ) +
+  scale_y_continuous(
+    labels = scales::comma, 
+    limits = c(0, 60),
+    expand = expansion(mult = c(0, 0.05))
+  ) +
+  scale_x_continuous(
+    breaks = seq(2002, 2023, by = 3),
+    expand = expansion(add = c(0, 0.5))
+  ) +
+  scale_color_manual(
+    values = c(
+      "Gabon" = "#1f77b4",  
+      "Belize" = "#ff7f0e",  
+      "Ecuador" = "#2ca02c",  
+      "El Salvador" = "#d62728"  
+    ),
+    name = "Recipient Country"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_markdown(size = 14, face = "bold", hjust = 0.5, margin = margin(b = 5)),
+    plot.caption = element_text(size = 9, margin = margin(t = 10), hjust = 1),
+    axis.text.x = element_text(angle = 45, hjust = 1, face = "bold", size = 10),
+    axis.text.y = element_text(size = 10),
+    axis.title.x = element_text(size = 12, face = "bold", margin = margin(t = 10)),
+    axis.title.y = element_text(size = 12, face = "bold", margin = margin(r = 10)),
+    panel.grid.major = element_line(color = "grey90"),
+    panel.grid.minor = element_blank(),
+    legend.position = "right",
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 10),
+    plot.background = element_rect(fill = "white", color = "grey30", size = 0.5),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.margin = margin(15, 15, 15, 15)
+  )
+
+# Convert to plotly with interactive tooltips
+p_plotly <- ggplotly(p, tooltip = c("x", "color", "y")) %>% 
+  layout(
+    hoverlabel = list(
+      bgcolor = "white",
+      font = list(family = "Arial", size = 11),
+      bordercolor = "grey"
+    ),
+    margin = list(t = 100)  # Adjusted for title + subtitle space
+  )
+
+# Display the plot
+p_plotly
+
+--------------------------------------------------------------------------
+# us_oda_environmental_vs_non_environmental_2023.R
+-------------------------------------------------------------------------------  
+# Load required packages
+library(data.table)
+library(ggplot2)
+
+# Load and preprocess the ODA by sectors data
+SectorsODA <- read.csv("/Users/trumu/Desktop/TNC/Data/ODaSectors.csv")
+
+# Print column names to debug
+print("Column names in SectorsODA:")
+print(colnames(SectorsODA))
+
+# Remove columns with any NA values
+SectorsODA <- SectorsODA[, colSums(is.na(SectorsODA)) == 0]
+
+# Keep relevant columns
+columns_to_keep <- c("Donor", "Recipient", "TIME_PERIOD", "OBS_VALUE", "Marker")
+data <- SectorsODA[, columns_to_keep, drop = FALSE]
+
+# Convert to data.table and ensure correct types
+setDT(data)
+data[, `:=`(OBS_VALUE = as.numeric(OBS_VALUE), TIME_PERIOD = as.numeric(TIME_PERIOD))]
+
+# Filter for US as donor, specified recipient countries, and 2023
+data <- data[Donor == "United States" & 
+                               Recipient %in% c("Gabon", "Belize", "Ecuador", "El Salvador") & 
+                               TIME_PERIOD == 2023]
+
+# Check if data_sectors has data
+print("Number of rows in data_sectors after filtering:")
+print(nrow(data))
+
+# Aggregate all environmental ODA (combine all markers into "Environmental Goal")
+env_oda <- data[, .(Env_ODA = sum(OBS_VALUE, na.rm = TRUE)), by = .(Recipient)]
+env_oda[, Category := "Environmental Goal"]
+
+# Load and preprocess the Grand ODA data
+Data<- read.csv("DACCountries.csv")%>%
+  mutate(
+    TIME_PERIOD = as.numeric(TIME_PERIOD),
+    OBS_VALUE = as.numeric(OBS_VALUE),
+    Measure = factor(Measure,
+                     levels = c("Official development assistance (ODA), disbursements",
+                                "Humanitarian aid",
+                                "Development food aid")))
+
+
+Data<- Data %>%
+  mutate(TIME_PERIOD = as.numeric(TIME_PERIOD))  # Force conversion to numeric
+
+# Print column names to debug
+print("Column names in GrandODA:")
+print(colnames(GrandODA))
+
+# Remove columns with any NA values
+Data <- Data[, colSums(is.na(Data)) == 0]
+
+# Keep relevant columns
+columns_to_keep_grand <- c("Donor", "Recipient", "TIME_PERIOD", "OBS_VALUE")
+Data<- Data[, columns_to_keep_grand, drop = FALSE]
+
+# Convert to data.table and ensure correct types
+setDT(Data)
+Data[, `:=`(OBS_VALUE = as.numeric(OBS_VALUE), TIME_PERIOD = as.numeric(TIME_PERIOD))]
+
+# Filter for US as donor, specified recipient countries, and 2023
+Data<- Data[Donor == "United States" & 
+                           Recipient %in% c("Gabon", "Belize", "Ecuador", "El Salvador") & 
+                           TIME_PERIOD == 2023]
+
+# Check if data_grand has data
+print("Number of rows in data_grand after filtering:")
+print(nrow(Data))
+
+# Aggregate total ODA from Grand ODA data
+total_oda <- Data[, .(Total_ODA = sum(OBS_VALUE, na.rm = TRUE)), by = .(Recipient)]
+
+# Merge environmental ODA with total ODA
+merged_data <- merge(total_oda, env_oda[, .(Recipient, Env_ODA)], by = "Recipient", all.x = TRUE)
+
+# Replace NA in Env_ODA with 0 (if no environmental ODA exists)
+merged_data[is.na(Env_ODA), Env_ODA := 0]
+
+# Calculate non-environmental ODA
+merged_data[, Others := Total_ODA - Env_ODA]
+
+# Reshape data for plotting (stacked bar chart format)
+plot_data <- rbind(
+  data.table(Recipient = merged_data$Recipient, Category = "Environmental Goal", ODA = merged_data$Env_ODA),
+  data.table(Recipient = merged_data$Recipient, Category = "Others", ODA = merged_data$Others)
+)
+
+# Create the stacked bar chart
+p <- ggplot(plot_data, aes(x = Recipient, y = ODA, fill = Category)) +
+  geom_bar(stat = "identity", position = "stack", width = 0.7, color = "white", linewidth = 0.2) +
+  labs(
+    title = "<b>U.S. ODA Allocation (2023)</b><br><span style='font-size:11px'>Environmental Funding vs Others </span>",
+    x = "", 
+    y = "ODA ($ Millions)",
+    caption = "Source: U.S. Agency for International Development"
+  ) +
+  scale_y_continuous(
+    labels = scales::comma,
+    expand = expansion(mult = c(0, 0.05))  # Prevent gap at bottom
+  ) +
+  scale_fill_manual(
+    values = c(
+      "Environmental Goal" = "#2ca02c",  # Green
+      "Others" = "#d3d3d3"               # Light gray
+    ),
+    name = "",
+    labels = c("Environmental", "Other Sectors")
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_markdown(hjust = 0.5, size = 14, face = "bold", margin = margin(b = 5)),
+    plot.subtitle = element_markdown(hjust = 0.5),
+    axis.text.x = element_text(angle = 45, hjust = 1, face = "bold", size = 11),
+    axis.text.y = element_text(size = 10),
+    axis.title.y = element_text(size = 12, face = "bold", margin = margin(r = 10)),
+    plot.caption = element_text(size = 9, hjust = 1, margin = margin(t = 10)),
+    panel.grid.major.y = element_line(color = "grey90"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),  # Cleaner x-axis
+    legend.position = "top",
+    legend.justification = "center",
+    legend.margin = margin(b = -5),  # Move legend closer to title
+    plot.background = element_rect(fill = "white", color = "grey30", size = 0.5),
+    plot.margin = margin(15, 15, 15, 15)
+  )
+
+# Convert to interactive plotly
+p_plotly <- ggplotly(p, tooltip = c("y", "fill")) %>%
+  layout(
+    hoverlabel = list(bgcolor = "white", font = list(size = 11)),
+    margin = list(t = 80),  # Adjust for title space
+    legend = list(orientation = "h", y = 1.1)  # Horizontal legend
+  )
+
+p_plotly
+
+
+
+
+
+
+
+
+
+
+
+
+
+
