@@ -185,7 +185,163 @@ p
 
 # Save chart as high-resolution PNG for Word
 ggsave("trade_trends_actual.png", plot = p, width = 6, height = 6, dpi = 300, units = "in")
+----------------------------------------------------------------------------------------
+#For imports 2024 but includes the cleaning process etc.
+getwd()
+sheet1 <- read_excel("/Users/trumu/Desktop/TNC/Plat/Export.xlsx", sheet = "Central")
+sheet2 <- read_excel("/Users/trumu/Desktop/TNC/Plat/Export.xlsx", sheet = "South")
+sheet3 <- read_excel("/Users/trumu/Desktop/TNC/Plat/Export.xlsx", sheet = "Sub")
+export_datasheet <- bind_rows(sheet1, sheet2, sheet3)
 
-# Optional: Preview interactive version (run this to check data)
-# library(plotly)
-# ggplotly(p)
+sheet4 <- read_excel("/Users/trumu/Desktop/TNC/Plat/Imports.xlsx", sheet = "Central")
+sheet5 <- read_excel("/Users/trumu/Desktop/TNC/Plat/Imports.xlsx", sheet = "South")
+sheet6 <- read_excel("/Users/trumu/Desktop/TNC/Plat/Imports.xlsx", sheet = "Sub")
+imports_datasheet <- bind_rows(sheet4, sheet5, sheet6)
+
+----------------------------------------------------------------------------
+# Load packages
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(readxl)
+
+
+# Define the six named products
+named_products <- c(
+  "111--Agricultural Products",
+  "112--Livestock & Livestock Products",
+  "113--Forestry Products",
+  "114--Fish & Other Marine Products",
+  "321--Wood Products",
+  "322--Paper",
+  "Other"
+)
+
+# Function to process each dataset (exports or imports)
+process_data <- function(data, flow_type) {
+  # Filter for named products
+  named_data <- data %>%
+    filter(Product %in% named_products) %>%
+    mutate(Product = factor(Product, levels = named_products))
+  
+  # Aggregate all other products into the "Other" category
+  other_data <- data %>%
+    filter(!Product %in% named_products, Product != "0–All Merchandise") %>%
+    group_by(Country, Flow, `Product Classification`, Unit) %>%
+    summarise(across(all_of("2024"), sum, na.rm = TRUE), .groups = "drop") %>%
+    mutate(Product = "Other")
+  
+  # Combine named and "Other"
+  combined_data <- bind_rows(named_data, other_data)
+  
+  # Keep only 2024 data, reshape to long format
+  long_data <- combined_data %>%
+    pivot_longer(cols = "2024", 
+                 names_to = "Year", 
+                 values_to = "Value") %>%
+    mutate(Flow = flow_type, Year = 2024) %>%
+    select(Product, Flow, Country, Year, Value)
+  
+  return(long_data)
+}
+
+# Process the datasets
+export_long <- process_data(export_datasheet, "Exports")
+import_long <- process_data(imports_datasheet, "Imports")
+
+# Combine both into one dataset (optional)
+all_data <- bind_rows(export_long, import_long)
+
+
+#Breaking it down into the various regions and ordering it by year.
+Central <- all_data %>%
+  filter(Country == "Central America") %>%
+  group_by(Year, Flow, Product) %>%
+  summarize(Value = sum(Value), .groups = "drop")
+
+Central <- Central %>%
+  group_by(Year, Flow) %>%
+  mutate(Total_Value = sum(Value, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(Percentage = (Value / Total_Value) * 100) %>%
+  select(Year, Flow, Product, Value, Percentage) %>%
+  arrange(Year, Flow, Product) %>%
+  # Round Percentage to 2 decimal places for readability
+  mutate(Percentage = round(Percentage, 2))
+
+South <- all_data %>%
+  filter(Country == "South America") %>%
+  group_by(Year, Flow, Product) %>%
+  summarize(Value = sum(Value), .groups = "drop")
+
+Sub <- all_data %>%
+  filter(Country == "Sub-Saharan Africa") %>%
+  group_by(Year, Flow, Product) %>%
+  summarize(Value = sum(Value), .groups = "drop")
+----------------------------------------------
+#Still on imports 2024
+library(ggplot2)
+library(dplyr)
+
+# Filter import data for 2024 and exclude "Other"
+plot_data <- import_long %>%
+  filter(Year == 2024, Product != "Other")
+
+# Optional: reorder products for consistent coloring/order
+plot_data$Product <- factor(plot_data$Product, levels = named_products[-length(named_products)]) 
+# Exclude "Other" from named_products in levels
+
+library(ggplot2)
+library(dplyr)
+
+# Filter import data for 2024 and exclude "Other"
+plot_data <- import_long %>%
+  filter(Year == 2024, Product != "Other")
+
+# Set product factor levels to ensure order and matching colors
+product_levels <- c(
+  "111--Agricultural Products",
+  "112--Livestock & Livestock Products",
+  "113--Forestry Products",
+  "114--Fish & Other Marine Products",
+  "321--Wood Products",
+  "322--Paper"
+)
+
+plot_data$Product <- factor(plot_data$Product, levels = product_levels)
+
+# Define your custom color palette
+custom_colors <- c(
+  "111--Agricultural Products" = "#49A842",  # Green
+  "112--Livestock & Livestock Products" = "#3498DB", # Blue
+  "113--Forestry Products" = "#00291F",  # Dark green
+  "114--Fish & Other Marine Products" = "#85C1E9", # Light blue
+  "321--Wood Products" = "#8B4513", # Brown
+  "322--Paper" = "#9B59B6"  # Purple
+)
+
+# Plot with custom colors
+  ggplot(plot_data, aes(x = Country, y = Value, fill = Product)) +
+  geom_bar(
+    stat = "identity",
+    position = "stack",
+    width = 0.7,
+    color = "white",
+    linewidth = 0.3
+  ) +
+  scale_fill_manual(values = custom_colors) +
+  labs(
+    title = "Imports by Product Category (2024)",
+    x = "",
+    y = "Import Value ($)"
+  ) +
+  scale_y_continuous(
+    breaks = scales::pretty_breaks(n = 6),
+    labels = function(x) paste0(scales::comma(x / 1000), "B"),
+    expand = c(0, 0)
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom"
+  )
